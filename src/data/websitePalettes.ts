@@ -1,0 +1,78 @@
+import type { ColorToken } from '../types'
+
+type WebsitePalette = { name: string; description: string; colors: ColorToken[] }
+
+export const websitePalettes: WebsitePalette[] = [
+  {
+    name: 'Violet night',
+    description: 'Dark product UI with a vivid violet accent.',
+    colors: [
+      { name: 'Primary', value: '#6D5CE7', category: 'Brand' },
+      { name: 'Secondary', value: '#9685FB', category: 'Brand' },
+      { name: 'Accent', value: '#3CC8D6', category: 'Brand' },
+      { name: 'Background', value: '#0D111B', category: 'Surface' },
+      { name: 'Surface', value: '#151C28', category: 'Surface' },
+      { name: 'Border', value: '#2B3444', category: 'Surface' },
+      { name: 'Text', value: '#F4F6FC', category: 'Text' },
+      { name: 'Muted text', value: '#A5AEC1', category: 'Text' },
+      { name: 'Success', value: '#30C17B', category: 'Status' },
+      { name: 'Warning', value: '#F3AF47', category: 'Status' },
+      { name: 'Error', value: '#F06B72', category: 'Status' },
+      { name: 'Info', value: '#48BCE8', category: 'Status' },
+    ],
+  },
+  {
+    name: 'Ocean clarity',
+    description: 'Bright blue and teal for clear, confident interfaces.',
+    colors: [
+      { name: 'Primary', value: '#2563EB', category: 'Brand' },
+      { name: 'Secondary', value: '#0EA5E9', category: 'Brand' },
+      { name: 'Accent', value: '#14B8A6', category: 'Brand' },
+      { name: 'Background', value: '#F7FAFF', category: 'Surface' },
+      { name: 'Surface', value: '#FFFFFF', category: 'Surface' },
+      { name: 'Border', value: '#D7E2F0', category: 'Surface' },
+      { name: 'Text', value: '#10233F', category: 'Text' },
+      { name: 'Muted text', value: '#52647A', category: 'Text' },
+      { name: 'Success', value: '#16A34A', category: 'Status' },
+      { name: 'Warning', value: '#D97706', category: 'Status' },
+      { name: 'Error', value: '#DC2626', category: 'Status' },
+      { name: 'Info', value: '#0284C7', category: 'Status' },
+    ],
+  },
+  {
+    name: 'Forest calm',
+    description: 'Natural greens balanced with warm neutral surfaces.',
+    colors: [
+      { name: 'Primary', value: '#18735A', category: 'Brand' },
+      { name: 'Secondary', value: '#5BAE8A', category: 'Brand' },
+      { name: 'Accent', value: '#C1D977', category: 'Brand' },
+      { name: 'Background', value: '#F6FAF6', category: 'Surface' },
+      { name: 'Surface', value: '#FFFFFF', category: 'Surface' },
+      { name: 'Border', value: '#D8E5DC', category: 'Surface' },
+      { name: 'Text', value: '#18352A', category: 'Text' },
+      { name: 'Muted text', value: '#637B6E', category: 'Text' },
+      { name: 'Success', value: '#198754', category: 'Status' },
+      { name: 'Warning', value: '#B7791F', category: 'Status' },
+      { name: 'Error', value: '#D14343', category: 'Status' },
+      { name: 'Info', value: '#277DA1', category: 'Status' },
+    ],
+  },
+  {
+    name: 'Coral studio',
+    description: 'Warm coral and amber for expressive editorial brands.',
+    colors: [
+      { name: 'Primary', value: '#D9584F', category: 'Brand' },
+      { name: 'Secondary', value: '#FF8A65', category: 'Brand' },
+      { name: 'Accent', value: '#E8B45B', category: 'Brand' },
+      { name: 'Background', value: '#FFF8F5', category: 'Surface' },
+      { name: 'Surface', value: '#FFFFFF', category: 'Surface' },
+      { name: 'Border', value: '#F0DDD4', category: 'Surface' },
+      { name: 'Text', value: '#2E2424', category: 'Text' },
+      { name: 'Muted text', value: '#756866', category: 'Text' },
+      { name: 'Success', value: '#3D9B75', category: 'Status' },
+      { name: 'Warning', value: '#BF7A2B', category: 'Status' },
+      { name: 'Error', value: '#C14444', category: 'Status' },
+      { name: 'Info', value: '#397A9C', category: 'Status' },
+    ],
+  },
+]
