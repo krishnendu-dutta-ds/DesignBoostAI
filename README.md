@@ -1,40 +1,26 @@
 # DesignBoost AI
 
-A browser-based workspace for creating and managing design systems, including color palettes, typography, spacing, components, and design tokens.
+DesignBoost AI is a creative workspace for building and maintaining consistent design systems. Bring your colors, typography, spacing, accessibility choices, and reusable design tokens together so every screen feels like part of the same product.
 
-Live site: https://design-boost-ai.vercel.app/
+Open the workspace: [design-boost-ai.vercel.app](https://design-boost-ai.vercel.app/)
 
-Sign in with Google to store projects in Firebase Cloud Firestore. A local browser copy is retained, and projects already saved in the browser are migrated to your account the first time the workspace connects. Projects can also be imported from or exported to JSON.
+## What you can do
 
-## Getting started
+- Create and manage a separate design system for each project.
+- Explore color palettes and build clear, reusable type scales.
+- Set spacing foundations and organize design tokens.
+- Review accessibility considerations as you refine your visual choices.
+- Switch between saved systems as your design work changes.
+- Keep your workspace available across your signed-in devices.
+- Export a backup or restore a project when you want to move or preserve your work.
 
-Requires Node.js.
+## Using the workspace
 
-```bash
-npm install
-npm run dev
-```
+1. Open the workspace and sign in with Google.
+2. Go to **My projects** to create a design system, or open one you have already saved.
+3. Use **Color studio**, **Typography**, **Spacing**, and **Design tokens** to develop the foundations of your system.
+4. Visit **Accessibility** to review your choices and make your designs easier to use.
+5. Switch systems from the workspace navigation. Use a project's actions to rename, duplicate, or delete it.
+6. Use **Export** to save a backup, or **Restore / import** to bring existing work into your workspace.
 
-## Firebase setup
-
-1. In Firebase project `designboostai-8225e`, enable Google under **Authentication → Sign-in method** and add `design-boost-ai.vercel.app` under **Authorized domains**.
-2. Register a Firebase Web App and copy its web configuration.
-3. Add these environment variables in the Vercel project settings for Production, Preview, and Development:
-   - `VITE_FIREBASE_API_KEY`
-   - `VITE_FIREBASE_AUTH_DOMAIN`
-   - `VITE_FIREBASE_PROJECT_ID`
-   - `VITE_FIREBASE_APP_ID`
-4. For local development, copy `.env.example` to `.env.local` and fill in the same values.
-5. Deploy the rules in `firestore.rules` with the Firebase CLI: `firebase deploy --only firestore:rules --project designboostai-8225e`.
-
-The existing Firestore database is in `eur3` (Europe multi-region). Documents are stored at `users/{uid}/projects/{projectId}`. Rules restrict access to the signed-in owner. When Firebase first loads, remote projects take precedence for matching IDs and unique projects from the local browser are copied to Firestore.
-
-## Vercel deployment
-
-Vercel detects the Vite app and builds it with `npm run build`, serving the `dist` directory. The `vercel.json` rewrite supports direct visits to client-side routes.
-
-Create a production build with:
-
-```bash
-npm run build
-```
+Changes are saved to your signed-in workspace as you work.
