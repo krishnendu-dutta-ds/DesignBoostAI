@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { initialProjects } from '../data/seed'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
 import type { ColorToken, DesignProject, DesignTeam, GradientSettings, ProjectSettingsPatch } from '../types'
+import type { GeneratedDesignSystem } from '../utils/gemini'
 
 type ThemeMode = 'system' | 'dark' | 'light'
 
@@ -35,6 +36,7 @@ type DesignState = {
   removeColor: (index: number) => void
   updateGradient: (patch: Partial<GradientSettings>) => void
   addToken: (token: DesignProject['tokens'][number]) => void
+  applyGeneratedDesign: (projectId: string, design: GeneratedDesignSystem) => number
   removeToken: (name: string) => void
   updateToken: (name: string, patch: Partial<DesignProject['tokens'][number]>) => void
   updateProjectSettings: (patch: ProjectSettingsPatch) => void
@@ -45,7 +47,7 @@ const updated = (project: DesignProject) => ({ ...project, updatedAt: new Date()
 
 export const useDesignStore = create<DesignState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       projects: initialProjects,
       activeProjectId: '',
       teams: [],
@@ -217,6 +219,45 @@ export const useDesignStore = create<DesignState>()(
             project.id === state.activeProjectId ? updated({ ...project, tokens: [...project.tokens, token] }) : project,
           ),
         })),
+      applyGeneratedDesign: (projectId, design) => {
+        const project = get().projects.find((item) => item.id === projectId)
+        if (!project) return 0
+        const defaults = createDefaultProjectSettings()
+        const current = project.settings ?? defaults
+        const colors: ColorToken[] = design.colors.map((color) => ({ name: color.name, value: color.value, category: color.category }))
+        const tokens = [...project.tokens]
+        let added = 0
+        for (const token of design.tokens) {
+          const index = tokens.findIndex((item) => item.name === token.name)
+          if (index >= 0) tokens[index] = token
+          else {
+            tokens.push(token)
+            added += 1
+          }
+        }
+        const primary = colors.find((color) => color.name.toLowerCase() === 'primary')?.value ?? colors[0]?.value
+        const secondary = colors.find((color) => color.name.toLowerCase() === 'secondary')?.value ?? colors[1]?.value
+        set((state) => ({
+          projects: state.projects.map((item) => item.id === projectId
+            ? updated({
+              ...item,
+              colors,
+              tokens,
+              gradient: createDefaultGradientSettings(primary, secondary),
+              settings: {
+                typography: { ...defaults.typography, ...current.typography, ...design.typography },
+                spacing: { ...defaults.spacing, ...current.spacing, ...design.spacing },
+                component: {
+                  ...defaults.component,
+                  ...current.component,
+                  customComponents: [...(current.component.customComponents ?? defaults.component.customComponents)],
+                },
+              },
+            })
+            : item),
+        }))
+        return added
+      },
       removeToken: (name) =>
         set((state) => ({
           projects: state.projects.map((project) =>

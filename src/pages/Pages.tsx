@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Link } from 'react-router-dom'
 import {
   ArrowRight, Check, CheckCircle2, ChevronDown, Copy, Download, Eye, FolderKanban, Gauge,
-  Info, LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Pencil, Plus, Search, Sparkles, Sun, Trash2, TriangleAlert, Type, Upload, X,
+  LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Pencil, Plus, Search, Sparkles, Sun, Trash2, TriangleAlert, Type, Upload, X,
 } from 'lucide-react'
 import { useDesignStore } from '../store/useDesignStore'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
@@ -11,6 +11,8 @@ import { websitePalettes } from '../data/websitePalettes'
 import { contrastRatio, createGradientCss, createPaletteCss, hexFromHsl, hslFromHex, normalizeHex, rgbFromHex } from '../utils/color'
 import { getFontFamilyStack } from '../utils/fontFamily'
 import { createFigmaVariablesDocument, downloadJson, isDesignProject, isWorkspaceBackup, normalizeProject } from '../utils/projectExport'
+import { GEMINI_KEY_URL, useGeminiKey } from '../firebase/geminiKey'
+import { AIDesignPrompt } from '../components/AIDesignPrompt'
 
 const GoogleFontPicker = lazy(() => import('../components/GoogleFontPicker').then((module) => ({ default: module.GoogleFontPicker })))
 
@@ -439,6 +441,7 @@ export function TokensPage() {
     notify('Token added to your system')
   }
   return <div className="page"><PageTitle eyebrow="DESIGN SYSTEM / TOKENS" title="Design tokens" description="Review studio values and token variables in one place before exporting."><div ref={exportMenuRef} className={`dropdown-wrap ${exportMenuOpen ? 'menu-open' : ''}`}><button type="button" className="button-secondary" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen((open) => !open)}><Download size={15} /> Export tokens <ChevronDown size={13} /></button><div className="export-menu">{['CSS', 'JSON', 'SCSS', 'Tailwind'].map((format) => <button type="button" key={format} onClick={() => { exportTokens(format); setExportMenuOpen(false) }}>{format} format</button>)}</div></div></PageTitle>
+    <AIDesignPrompt notify={notify} />
     <Panel title="Studio values" description="Live values from Color Studio, Typography, and Spacing. Check this preview before exporting Figma variables." className="token-review-panel">
       <div className="token-review-grid">
         <section className="token-review-card"><h3>Colors <span>{colors.length}</span></h3>{colors.length ? <div className="token-review-color-list">{colors.map((color, index) => <div className="token-review-color" key={`${color.name}-${color.value}-${index}`}><i style={{ backgroundColor: color.value }} /><span>{color.name}</span><code>{color.value}</code></div>)}</div> : <p className="token-review-empty">No colors set in Color Studio yet.</p>}</section>
@@ -556,6 +559,17 @@ export function SettingsPage() {
   const setCompact = useDesignStore((state) => state.setCompactDensity)
   const theme = useDesignStore((state) => state.theme)
   const setTheme = useDesignStore((state) => state.setTheme)
+  const geminiApiKey = useGeminiKey((state) => state.apiKey)
+  const geminiEnabled = useGeminiKey((state) => state.enabled)
+  const geminiKeyStatus = useGeminiKey((state) => state.status)
+  const geminiKeyError = useGeminiKey((state) => state.error)
+  const loadGeminiKey = useGeminiKey((state) => state.load)
+  const saveGeminiKey = useGeminiKey((state) => state.save)
+  const removeGeminiKey = useGeminiKey((state) => state.remove)
+  const setGeminiEnabled = useGeminiKey((state) => state.setEnabled)
+  const [keyDraft, setKeyDraft] = useState('')
+  const [savingKey, setSavingKey] = useState(false)
+  useEffect(() => { void loadGeminiKey() }, [loadGeminiKey])
   const activeTeam = teams.find((team) => team.id === activeTeamId) ?? teams[0]
   const activeTeamName = activeTeam?.name ?? workspaceName
   const [editingProfile, setEditingProfile] = useState(false)
@@ -578,6 +592,49 @@ export function SettingsPage() {
     const created = addTeam(newTeamName.trim())
     setNewTeamName('')
     notify(`${created.name} created`)
+  }
+  const toggleAiGeneration = async () => {
+    if (!geminiApiKey) {
+      notify('Save a Gemini API key first')
+      return
+    }
+    setSavingKey(true)
+    try {
+      await setGeminiEnabled(!geminiEnabled)
+      notify(geminiEnabled ? 'AI generation deactivated' : 'AI generation activated')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not update AI generation')
+    } finally {
+      setSavingKey(false)
+    }
+  }
+  const saveApiKey = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!keyDraft.trim()) {
+      notify('Paste your Gemini API key first')
+      return
+    }
+    setSavingKey(true)
+    try {
+      await saveGeminiKey(keyDraft)
+      setKeyDraft('')
+      notify('Gemini API key saved to your account')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not save the Gemini API key')
+    } finally {
+      setSavingKey(false)
+    }
+  }
+  const clearApiKey = async () => {
+    setSavingKey(true)
+    try {
+      await removeGeminiKey()
+      notify('Gemini API key removed')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not remove the Gemini API key')
+    } finally {
+      setSavingKey(false)
+    }
   }
   return <div className="page">
     <PageTitle eyebrow="WORKSPACE / PREFERENCES" title="Settings" description="Make your workspace feel like yours." />
@@ -639,6 +696,36 @@ export function SettingsPage() {
             <span className="preference-status"><i />On</span>
           </div>
         </Panel>
+        <Panel title="AI design generation" description="Connect your own Gemini API key, then activate AI to generate a complete design system from a prompt.">
+          <form className="settings-ai-key" onSubmit={saveApiKey}>
+            <label className="field-label" htmlFor="gemini-api-key">Gemini API key</label>
+            <div className="settings-ai-key-row">
+              <input
+                id="gemini-api-key"
+                className="field-control"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={geminiApiKey ? `Saved key ending in ${geminiApiKey.slice(-4)}` : 'Paste your Gemini API key'}
+                value={keyDraft}
+                onChange={(event) => setKeyDraft(event.target.value)}
+              />
+              <button className="button-primary" type="submit" disabled={savingKey || geminiKeyStatus === 'loading'}>{savingKey ? 'Saving…' : geminiApiKey ? 'Replace key' : 'Save key'}</button>
+              {geminiApiKey && <button className="button-secondary" type="button" disabled={savingKey} onClick={() => void clearApiKey()}>Remove</button>}
+            </div>
+            {geminiKeyError && <div className="firebase-auth-error" role="alert">{geminiKeyError}</div>}
+            <div className="settings-ai-meta">
+              <span className={`preference-status ${geminiApiKey ? '' : 'off'}`}><i />{geminiApiKey ? 'Key saved to your account' : 'No key saved'}</span>
+              <a className="text-link" href={GEMINI_KEY_URL} target="_blank" rel="noreferrer">Get a Gemini API key <ArrowRight size={13} /></a>
+            </div>
+            <div className="settings-row">
+              <div><b>Activate AI generation</b><small>Show the AI prompt panel on the Design tokens page for this account.</small></div>
+              <button type="button" className={`toggle-switch ${geminiEnabled ? 'on' : ''}`} aria-label="Toggle AI generation" aria-pressed={geminiEnabled} disabled={!geminiApiKey || savingKey} onClick={() => void toggleAiGeneration()}><i /></button>
+            </div>
+            <p className="field-hint">Your key is stored in your private account data and is only used for generation requests made from this browser. Every signed-in user connects their own key.</p>
+            <Link className="button-secondary compact" to="/tokens">Open AI prompt <ArrowRight size={13} /></Link>
+          </form>
+        </Panel>
       </div>
       <aside className="settings-side">
         <Panel title="About" description="A little about this workspace.">
@@ -694,7 +781,10 @@ function ratioLabel(r: number) { return r.toFixed(2) + ':1' }
 
 /** Adjust HSL lightness of a hex until contrast vs bgHex hits targetRatio. Max 60 steps. */
 function suggestCompliantHex(fgHex: string, bgHex: string, targetRatio: number): string {
-  const { h, s, l } = hslFromHex(fgHex)
+  const hslParts = hslFromHex(fgHex).match(/\d+/g) ?? []
+  const h = Number(hslParts[0] ?? 0)
+  const s = Number(hslParts[1] ?? 0)
+  const l = Number(hslParts[2] ?? 0)
   const bgLum = luminance(normalizeHex(bgHex) ?? '#000000')
   // Try darkening first, then lightening
   for (const dir of [-1, 1]) {
