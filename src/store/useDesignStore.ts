@@ -4,7 +4,7 @@ import { initialProjects } from '../data/seed'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
 import type { ColorToken, DesignProject, GradientSettings, ProjectSettingsPatch } from '../types'
 
-type ThemeMode = 'dark' | 'light'
+type ThemeMode = 'system' | 'dark' | 'light'
 
 type DesignState = {
   projects: DesignProject[]
@@ -44,7 +44,7 @@ export const useDesignStore = create<DesignState>()(
       sidebarCollapsed: false,
       workspaceName: 'My workspace',
       compactDensity: false,
-      theme: 'dark',
+      theme: 'system',
       setActiveProject: (id) => set({ activeProjectId: id }),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       setWorkspaceName: (name) => set({ workspaceName: name }),

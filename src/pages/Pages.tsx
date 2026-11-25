@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight, Check, ChevronDown, Copy, Download, Eye, FolderKanban,
-  LayoutGrid, Moon, MoreHorizontal, Palette, Plus, Search, Sparkles, Sun, Trash2, Type, Upload, X,
+  LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Plus, Search, Sparkles, Sun, Trash2, Type, Upload, X,
 } from 'lucide-react'
 import { useDesignStore } from '../store/useDesignStore'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
@@ -452,7 +452,7 @@ export function ProjectsPage() {
     if (!name.trim()) return
     addProject(name.trim())
     setName('')
-    notify('Design system created; syncing to Firebase')
+    notify('Design system created; syncing to your account')
   }
   const importFile = (file?: File) => {
     if (!file) return
@@ -466,21 +466,21 @@ export function ProjectsPage() {
             ? parsed.activeProjectId
             : (parsed.projects[0]?.id ?? '')
           replaceProjects(parsed.projects.map(normalizeProject), activeId)
-          notify(`Workspace restored · ${parsed.projects.length} project${parsed.projects.length === 1 ? '' : 's'} · syncing to Firebase`)
+          notify(`Workspace restored · ${parsed.projects.length} project${parsed.projects.length === 1 ? '' : 's'} · syncing to your account`)
           return
         }
         if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isDesignProject)) {
           if (!window.confirm(`Import ${parsed.length} projects and replace the current workspace?`)) return
           const restored = parsed.map(normalizeProject)
           replaceProjects(restored, restored[0].id)
-          notify(`${parsed.length} projects restored · syncing to Firebase`)
+          notify(`${parsed.length} projects restored · syncing to your account`)
           return
         }
         if (isDesignProject(parsed)) {
           const alreadyExists = projects.some((project) => project.id === parsed.id)
           const restored = normalizeProject(parsed)
           replaceProjects([restored, ...projects.filter((project) => project.id !== restored.id)])
-          notify(`${alreadyExists ? `${parsed.name} configuration restored` : `${parsed.name} imported`} · syncing to Firebase`)
+          notify(`${alreadyExists ? `${parsed.name} configuration restored` : `${parsed.name} imported`} · syncing to your account`)
           return
         }
         notify('Could not import: this is not a valid DesignBoost project or workspace backup')
@@ -492,8 +492,8 @@ export function ProjectsPage() {
   }
   return <div className="page"><PageTitle eyebrow="WORKSPACE / PROJECTS" title="Your projects" description="Manage design systems for every product and team."><label className="button-secondary file-button"><Upload size={15} /> Restore / import JSON<input type="file" accept="application/json,.json" onChange={(event) => { importFile(event.target.files?.[0]); event.currentTarget.value = '' }} /></label></PageTitle>
     <form className="create-project-bar" onSubmit={createProject}><span className="new-project-icon"><Plus size={18} /></span><div><strong>Start a new design system</strong><small>Set up a shared foundation for your next product.</small></div><input ref={inputRef} className="field-control" placeholder="Name your project..." value={name} onChange={(event) => setName(event.target.value)} required /><button className="button-primary" type="submit"><Plus size={15} /> Create</button></form>
-    <div className="projects-heading"><div><h2>All projects <span>{projects.length}</span></h2><p>Saved to your Firebase account</p></div><span className="select-small">Sorted by last modified</span></div>
-    <div className="projects-grid">{sortedProjects.map((project) => <article className={`project-card ${activeProjectId === project.id ? 'current' : ''}`} key={project.id}><div className="project-card-art"><div className="project-art-swatches">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} title={color.name} />) : <span>No colors added yet</span>}</div><button className="icon-button art-menu" title="More project actions" onClick={(event) => event.currentTarget.parentElement?.classList.toggle('menu-open')}><MoreHorizontal size={17} /></button><div className="project-menu"><button onClick={() => { const next = window.prompt('Rename design system', project.name); if (next?.trim()) { renameProject(project.id, next.trim()); notify('Project renamed; syncing to Firebase') } }}>Rename</button><button onClick={() => { duplicateProject(project.id); notify('Project duplicated; syncing to Firebase') }}>Duplicate</button><button className="danger-text" onClick={() => { if (window.confirm(`Delete “${project.name}”? This cannot be undone.`)) { deleteProject(project.id); notify('Project deleted; syncing to Firebase') } }}>Delete</button></div></div><div className="project-card-body"><div className="project-card-title"><h3>{project.name}</h3>{activeProjectId === project.id && <span className="active-badge">Active</span>}</div><p>{project.colors.length} colors <i /> {project.tokens.length} tokens <i /> Edited {new Date(project.updatedAt).toLocaleDateString()}</p><div className="project-card-bottom"><div className="mini-palette">{project.colors.slice(0, 6).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><button className="button-secondary compact" onClick={() => { setActiveProject(project.id); notify(`${project.name} is now active`) }}>Open project <ArrowRight size={13} /></button></div></div></article>)}</div>
+    <div className="projects-heading"><div><h2>All projects <span>{projects.length}</span></h2><p>Saved to your cloud account</p></div><span className="select-small">Sorted by last modified</span></div>
+    <div className="projects-grid">{sortedProjects.map((project) => <article className={`project-card ${activeProjectId === project.id ? 'current' : ''}`} key={project.id}><div className="project-card-art"><div className="project-art-swatches">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} title={color.name} />) : <span>No colors added yet</span>}</div><button className="icon-button art-menu" title="More project actions" onClick={(event) => event.currentTarget.parentElement?.classList.toggle('menu-open')}><MoreHorizontal size={17} /></button><div className="project-menu"><button onClick={() => { const next = window.prompt('Rename design system', project.name); if (next?.trim()) { renameProject(project.id, next.trim()); notify('Project renamed; syncing to your account') } }}>Rename</button><button onClick={() => { duplicateProject(project.id); notify('Project duplicated; syncing to your account') }}>Duplicate</button><button className="danger-text" onClick={() => { if (window.confirm(`Delete “${project.name}”? This cannot be undone.`)) { deleteProject(project.id); notify('Project deleted; syncing to your account') } }}>Delete</button></div></div><div className="project-card-body"><div className="project-card-title"><h3>{project.name}</h3>{activeProjectId === project.id && <span className="active-badge">Active</span>}</div><p>{project.colors.length} colors <i /> {project.tokens.length} tokens <i /> Edited {new Date(project.updatedAt).toLocaleDateString()}</p><div className="project-card-bottom"><div className="mini-palette">{project.colors.slice(0, 6).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><button className="button-secondary compact" onClick={() => { setActiveProject(project.id); notify(`${project.name} is now active`) }}>Open project <ArrowRight size={13} /></button></div></div></article>)}</div>
     {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}</div>
 }
 
@@ -501,7 +501,7 @@ export function SavedSystemsPage() {
   const projects = useDesignStore((state) => state.projects)
   const active = useDesignStore((state) => state.activeProjectId)
   const setActive = useDesignStore((state) => state.setActiveProject)
-  return <div className="page"><PageTitle eyebrow="WORKSPACE / LIBRARY" title="Saved systems" description="Your reusable design foundations, ready to bring into any project." /><div className="saved-system-grid">{projects.map((project) => <button className={`saved-system-card ${active === project.id ? 'selected' : ''}`} key={project.id} onClick={() => setActive(project.id)}><div className="saved-system-colors">{project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><strong>{project.name}</strong><span>{project.tokens.length} tokens · {project.colors.length} colors</span><div className="saved-system-footer"><span>{active === project.id ? 'Currently active' : 'Click to switch system'}</span><ArrowRight size={14} /></div></button>)}</div><div className="info-banner"><Sparkles size={16} /><span>Your systems sync to Firebase for access across devices. Export a JSON backup from the top bar for an offline copy.</span></div></div>
+  return <div className="page"><PageTitle eyebrow="WORKSPACE / LIBRARY" title="Saved systems" description="Your reusable design foundations, ready to bring into any project." /><div className="saved-system-grid">{projects.map((project) => <button className={`saved-system-card ${active === project.id ? 'selected' : ''}`} key={project.id} onClick={() => setActive(project.id)}><div className="saved-system-colors">{project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><strong>{project.name}</strong><span>{project.tokens.length} tokens · {project.colors.length} colors</span><div className="saved-system-footer"><span>{active === project.id ? 'Currently active' : 'Click to switch system'}</span><ArrowRight size={14} /></div></button>)}</div><div className="info-banner"><Sparkles size={16} /><span>Your systems sync across your devices. Export a JSON backup from the top bar for an offline copy.</span></div></div>
 }
 
 export function SettingsPage() {
@@ -548,6 +548,7 @@ export function SettingsPage() {
           <div className="settings-row">
             <div><b>Appearance</b><small>Choose a workspace color theme.</small></div>
             <div className="theme-choices" role="group" aria-label="Appearance">
+              <button type="button" className={theme === 'system' ? 'selected' : ''} aria-pressed={theme === 'system'} onClick={() => setTheme('system')}><Monitor size={14} />System</button>
               <button type="button" className={theme === 'light' ? 'selected' : ''} aria-pressed={theme === 'light'} onClick={() => setTheme('light')}><Sun size={14} />Light</button>
               <button type="button" className={theme === 'dark' ? 'selected' : ''} aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}><Moon size={14} />Dark</button>
             </div>
@@ -557,7 +558,7 @@ export function SettingsPage() {
             <button type="button" className={`toggle-switch ${compact ? 'on' : ''}`} aria-label="Toggle compact density" aria-pressed={compact} onClick={() => setCompact(!compact)}><i /></button>
           </div>
           <div className="settings-row">
-            <div><b>Firebase sync</b><small>Project changes are synced to your signed-in account.</small></div>
+            <div><b>Cloud sync</b><small>Project changes are synced to your signed-in account.</small></div>
             <span className="preference-status"><i />On</span>
           </div>
         </Panel>
@@ -566,7 +567,7 @@ export function SettingsPage() {
         <Panel title="About" description="A little about this workspace.">
           <div className="about-row"><span>Application</span><b>DesignBoost AI</b></div>
           <div className="about-row"><span>Version</span><b>1.0.0</b></div>
-          <div className="about-row"><span>Storage</span><b>Firebase Cloud Firestore</b></div>
+          <div className="about-row"><span>Storage</span><b>Cloud database</b></div>
           <div className="recommendation"><Sparkles size={15} /><span><b>Your work stays yours</b><small>Your projects are private to your Google account and backed by a local browser copy.</small></span></div>
         </Panel>
       </aside>

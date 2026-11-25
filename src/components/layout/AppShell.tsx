@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Accessibility, Bell, Blocks, BookOpen, ChevronDown, ChevronsLeft, ChevronsRight, CircleHelp,
@@ -59,6 +59,9 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
   const workspaceName = useDesignStore((state) => state.workspaceName)
   const theme = useDesignStore((state) => state.theme)
   const setTheme = useDesignStore((state) => state.setTheme)
+  const [systemTheme, setSystemTheme] = useState<'dark' | 'light'>(() =>
+    window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+  )
   const activeProjectId = useDesignStore((state) => state.activeProjectId)
   const setActiveProject = useDesignStore((state) => state.setActiveProject)
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
@@ -66,10 +69,18 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
   const profileInitial = profileName.charAt(0).toUpperCase()
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const activeTheme = theme === 'system' ? systemTheme : theme
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    document.documentElement.style.colorScheme = theme
-  }, [theme])
+    const preference = window.matchMedia('(prefers-color-scheme: dark)')
+    const updateSystemTheme = () => setSystemTheme(preference.matches ? 'dark' : 'light')
+    updateSystemTheme()
+    preference.addEventListener('change', updateSystemTheme)
+    return () => preference.removeEventListener('change', updateSystemTheme)
+  }, [])
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = activeTheme
+    document.documentElement.style.colorScheme = activeTheme
+  }, [activeTheme])
   const searchResults = useMemo(
     () => Object.entries(pageNames).filter(([path, label]) => label.toLowerCase().includes(query.toLowerCase()) && path !== '/'),
     [query],
@@ -130,7 +141,7 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
         <div className="sidebar-bottom">
           <button className="profile-button" title="Open settings" onClick={() => navigate('/settings')}>
             <span className="profile-avatar">{profileInitial}</span>
-            {!collapsed && <><span className="profile-copy"><strong>{profileName}</strong><small>{user.email ?? 'Google account'}</small></span><Settings size={15} /></>}
+            {!collapsed && <><span className="profile-copy"><strong>{profileName}</strong><small title={user.email ?? 'Google account'}>{user.email ?? 'Google account'}</small></span><Settings size={15} /></>}
           </button>
         </div>
       </aside>
@@ -155,11 +166,11 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
             <button
               type="button"
               className="icon-button header-icon theme-toggle"
-              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              aria-label={`Switch to ${activeTheme === 'dark' ? 'light' : 'dark'} mode`}
+              title={`Switch to ${activeTheme === 'dark' ? 'light' : 'dark'} mode`}
+              onClick={() => setTheme(activeTheme === 'dark' ? 'light' : 'dark')}
             >
-              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+              {activeTheme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <div className={`dropdown-wrap header-export ${exportMenuOpen ? 'menu-open' : ''}`}>
               <button className="export-button" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen(!exportMenuOpen)}><Download size={15} /><span>Export</span><ChevronDown size={13} /></button>
@@ -169,7 +180,7 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
                 <button disabled={!activeProject} onClick={reviewFigmaVariables}>Review &amp; export Figma variables <small>Check color, typography, and spacing first</small></button>
               </div>
             </div>
-            <span className={`firebase-sync-indicator ${syncStatus}`} role="status"><i />{syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'error' ? 'Sync error' : 'Firebase synced'}</span>
+            <span className={`firebase-sync-indicator ${syncStatus}`} role="status"><i />{syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'error' ? 'Sync error' : 'Cloud synced'}</span>
             <span className="header-avatar" title={profileName}>{profileInitial}</span>
             <button type="button" className="icon-button sign-out-button" aria-label="Sign out" title="Sign out" onClick={onSignOut}><LogOut size={16} /></button>
           </div>
