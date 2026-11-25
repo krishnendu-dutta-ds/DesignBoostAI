@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
-  Accessibility, Bell, Blocks, BookOpen, ChevronDown, ChevronsLeft, ChevronsRight, CircleHelp,
-  Command, Download, FolderKanban, Gauge, LayoutDashboard, LogOut, Menu, Palette,
-  Moon, Search, Settings, SlidersHorizontal, Sun, Type, X,
+  Accessibility, Bell, Blocks, Check, ChevronDown, ChevronsLeft, ChevronsRight, CircleHelp,
+  Command, Download, FolderKanban, Gauge, LayoutDashboard, LogOut, Menu, Palette, Plus,
+  Moon, Search, Settings, SlidersHorizontal, Sun, Trash2, Type, X,
 } from 'lucide-react'
 import type { User } from 'firebase/auth'
 import { useDesignStore } from '../../store/useDesignStore'
@@ -19,11 +19,10 @@ const groups = [
   ] },
   { title: 'Design tools', links: [
     { label: 'Accessibility', path: '/accessibility', icon: Accessibility },
-    { label: 'Design audit', path: '/accessibility', icon: Gauge },
+    { label: 'Design audit', path: '/audit', icon: Gauge },
   ] },
   { title: 'Workspace', links: [
     { label: 'My projects', path: '/projects', icon: FolderKanban },
-    { label: 'Saved systems', path: '/systems', icon: BookOpen },
     { label: 'Settings', path: '/settings', icon: Settings },
   ] },
 ]
@@ -32,7 +31,8 @@ const pageNames: Record<string, string> = {
   '/': 'Dashboard', '/colors': 'Color studio', '/typography': 'Typography',
   '/spacing': 'Spacing', '/tokens': 'Design tokens',
   '/accessibility': 'Accessibility',
-  '/projects': 'My projects', '/systems': 'Saved systems', '/settings': 'Settings',
+  '/audit': 'Design audit',
+  '/projects': 'My projects', '/settings': 'Settings',
 }
 
 function projectSlug(name: string) {
@@ -54,16 +54,29 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
   const [searchOpen, setSearchOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
+  const [creatingTeam, setCreatingTeam] = useState(false)
+  const [newTeamName, setNewTeamName] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const exportRef = useRef<HTMLDivElement>(null)
   const projects = useDesignStore((state) => state.projects)
+  const teams = useDesignStore((state) => state.teams)
+  const activeTeamId = useDesignStore((state) => state.activeTeamId)
+  const addTeam = useDesignStore((state) => state.addTeam)
+  const deleteTeam = useDesignStore((state) => state.deleteTeam)
+  const setActiveTeam = useDesignStore((state) => state.setActiveTeam)
   const workspaceName = useDesignStore((state) => state.workspaceName)
+  const activeTeam = teams.find((team) => team.id === activeTeamId) ?? teams[0]
+  const displayTeamName = activeTeam?.name ?? workspaceName
+  const displayTeamInitial = displayTeamName.charAt(0).toUpperCase() || 'D'
+  const compactDensity = useDesignStore((state) => state.compactDensity)
   const theme = useDesignStore((state) => state.theme)
   const setTheme = useDesignStore((state) => state.setTheme)
   const [systemTheme, setSystemTheme] = useState<'dark' | 'light'>(() =>
     window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
   )
   const activeProjectId = useDesignStore((state) => state.activeProjectId)
-  const setActiveProject = useDesignStore((state) => state.setActiveProject)
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
   const profileName = user.displayName || user.email || 'Google user'
   const profileInitial = profileName.charAt(0).toUpperCase()
@@ -80,9 +93,45 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = activeTheme
     document.documentElement.style.colorScheme = activeTheme
-  }, [activeTheme])
+    document.documentElement.classList.toggle('compact-density', compactDensity)
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]')
+    if (themeColorMeta) {
+      themeColorMeta.setAttribute('content', activeTheme === 'dark' ? '#14161b' : '#f4f5f7')
+    }
+  }, [activeTheme, compactDensity])
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSearchOpen(true)
+        setWorkspaceMenuOpen(false)
+        setExportMenuOpen(false)
+        searchInputRef.current?.focus()
+      } else if (event.key === 'Escape') {
+        setSearchOpen(false)
+        setWorkspaceMenuOpen(false)
+        setExportMenuOpen(false)
+        setMobileOpen(false)
+      }
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (workspaceRef.current && !workspaceRef.current.contains(target)) {
+        setWorkspaceMenuOpen(false)
+      }
+      if (exportRef.current && !exportRef.current.contains(target)) {
+        setExportMenuOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [])
   const searchResults = useMemo(
-    () => Object.entries(pageNames).filter(([path, label]) => label.toLowerCase().includes(query.toLowerCase()) && path !== '/'),
+    () => Object.entries(pageNames).filter(([, label]) => label.toLowerCase().includes(query.trim().toLowerCase())),
     [query],
   )
 
@@ -119,18 +168,80 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
           </button>
           <button className="icon-button mobile-close" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X size={17} /></button>
         </div>
-        <button className="workspace-switcher" aria-expanded={workspaceMenuOpen} onClick={() => setWorkspaceMenuOpen(!workspaceMenuOpen)}>
-          <span className="workspace-avatar">D</span>
-          {!collapsed && <><span className="workspace-copy"><strong>{workspaceName}</strong><small>Personal workspace</small></span><ChevronDown size={15} /></>}
-        </button>
-        {workspaceMenuOpen && <div className="workspace-menu">{projects.length ? projects.map((project) => <button key={project.id} className={project.id === activeProject?.id ? 'active' : ''} onClick={() => { setActiveProject(project.id); setWorkspaceMenuOpen(false) }}><span className="project-dot" />{project.name}{project.id === activeProject?.id && <span className="workspace-current">Active</span>}</button>) : <span className="workspace-empty">Create a project to get started</span>}</div>}
+        <div className="workspace-dropdown" ref={workspaceRef}>
+          <button className="workspace-switcher" aria-expanded={workspaceMenuOpen} onClick={() => { setWorkspaceMenuOpen(!workspaceMenuOpen); setCreatingTeam(false) }}>
+            <span className="workspace-avatar">{displayTeamInitial}</span>
+            {!collapsed && <><span className="workspace-copy"><strong>{displayTeamName}</strong><small>{teams.length > 1 ? `${teams.length} design teams` : 'Personal workspace'}</small></span><ChevronDown size={15} /></>}
+          </button>
+          {workspaceMenuOpen && <div className="workspace-menu">
+            <div className="workspace-menu-label">Design teams</div>
+            {teams.map((team) => (
+              <div key={team.id} className={`workspace-team-row ${team.id === activeTeam?.id ? 'active' : ''}`}>
+                <button
+                  type="button"
+                  className={`workspace-team-select ${team.id === activeTeam?.id ? 'active' : ''}`}
+                  onClick={() => { setActiveTeam(team.id); setWorkspaceMenuOpen(false); showNotice(`Switched to ${team.name}`) }}
+                >
+                  <span className="workspace-team-badge">{team.name.charAt(0).toUpperCase()}</span>
+                  <span className="workspace-team-name">{team.name}</span>
+                  {team.id === activeTeam?.id && <Check size={13} className="workspace-current" />}
+                </button>
+                {teams.length > 1 && (
+                  <button
+                    type="button"
+                    className="workspace-team-remove"
+                    aria-label={`Remove ${team.name}`}
+                    title={`Remove ${team.name}`}
+                    onClick={() => { deleteTeam(team.id); showNotice(`${team.name} removed`) }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="workspace-menu-divider" />
+            {creatingTeam ? (
+              <form
+                className="workspace-create-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const trimmed = newTeamName.trim()
+                  if (!trimmed) return
+                  addTeam(trimmed)
+                  setNewTeamName('')
+                  setCreatingTeam(false)
+                  setWorkspaceMenuOpen(false)
+                  showNotice(`${trimmed} created`)
+                }}
+              >
+                <input
+                  className="field-control compact-input"
+                  placeholder="Design team name..."
+                  value={newTeamName}
+                  onChange={(event) => setNewTeamName(event.target.value)}
+                  autoFocus
+                  maxLength={48}
+                  required
+                />
+                <div className="workspace-create-actions">
+                  <button type="submit" className="button-primary compact">Create</button>
+                  <button type="button" className="button-secondary compact" onClick={() => { setCreatingTeam(false); setNewTeamName('') }}>Cancel</button>
+                </div>
+              </form>
+            ) : (
+              <button type="button" className="workspace-add-button" onClick={() => setCreatingTeam(true)}>
+                <Plus size={14} /> New design team
+              </button>
+            )}
+          </div>}
+        </div>
         <nav id="main-navigation" className="side-nav" aria-label="Main navigation">
           {groups.map((group) => (
             <section className="nav-group" key={group.title}>
               {!collapsed && <div className="nav-heading">{group.title}</div>}
               {group.links.map(({ label, path, icon: Icon }) => (
                 <NavLink key={`${group.title}-${label}`} to={path} end={path === '/'} title={collapsed ? label : undefined}
-                  className={({ isActive }) => `nav-link ${isActive && label !== 'Design audit' ? 'active' : ''}`}
+                  className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
                   onClick={() => setMobileOpen(false)}>
                   <Icon size={17} strokeWidth={1.8} /><span>{label}</span>
                 </NavLink>
@@ -156,9 +267,9 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
           <div className="topbar-actions">
             <div className="search-wrap">
               <Search size={15} />
-              <input aria-label="Search workspace" placeholder="Search anything..." value={query} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false); if (event.key === 'Enter' && searchResults[0]) { navigate(searchResults[0][0]); setSearchOpen(false); setQuery('') } }} />
+              <input ref={searchInputRef} aria-label="Search workspace" placeholder="Search anything..." value={query} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} onKeyDown={(event) => { if (event.key === 'Escape') { setSearchOpen(false); event.currentTarget.blur() } if (event.key === 'Enter' && searchResults[0]) { navigate(searchResults[0][0]); setSearchOpen(false); setQuery(''); event.currentTarget.blur() } }} />
               <kbd><Command size={10} /> K</kbd>
-              {searchOpen && query && <div className="search-results">{searchResults.length ? searchResults.map(([path, label]) => <Link key={path} to={path} onClick={() => { setSearchOpen(false); setQuery('') }}><Search size={14} />{label}<span>Open</span></Link>) : <div className="search-empty">No matching pages</div>}</div>}
+              {searchOpen && <div className="search-results">{searchResults.length ? searchResults.map(([path, label]) => <Link key={path} to={path} onClick={() => { setSearchOpen(false); setQuery('') }}><Search size={14} />{label}<span>Open</span></Link>) : <div className="search-empty">No matching pages</div>}</div>}
             </div>
             {searchOpen && <button className="search-dismiss" aria-label="Close search" onClick={() => setSearchOpen(false)} />}
             <button className="icon-button header-icon" aria-label="Notifications" title="Notifications" onClick={() => showNotice('You’re all caught up')}><Bell size={17} /></button>
@@ -172,7 +283,7 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
             >
               {activeTheme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            <div className={`dropdown-wrap header-export ${exportMenuOpen ? 'menu-open' : ''}`}>
+            <div ref={exportRef} className={`dropdown-wrap header-export ${exportMenuOpen ? 'menu-open' : ''}`}>
               <button className="export-button" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen(!exportMenuOpen)}><Download size={15} /><span>Export</span><ChevronDown size={13} /></button>
               <div className="export-menu">
                 <button onClick={exportWorkspace}>All projects backup <small>Full configuration · JSON</small></button>

@@ -2,13 +2,15 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { initialProjects } from '../data/seed'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
-import type { ColorToken, DesignProject, GradientSettings, ProjectSettingsPatch } from '../types'
+import type { ColorToken, DesignProject, DesignTeam, GradientSettings, ProjectSettingsPatch } from '../types'
 
 type ThemeMode = 'system' | 'dark' | 'light'
 
 type DesignState = {
   projects: DesignProject[]
   activeProjectId: string
+  teams: DesignTeam[]
+  activeTeamId: string
   sidebarCollapsed: boolean
   workspaceName: string
   compactDensity: boolean
@@ -16,6 +18,11 @@ type DesignState = {
   setActiveProject: (id: string) => void
   setSidebarCollapsed: (collapsed: boolean) => void
   setWorkspaceName: (name: string) => void
+  addTeam: (name: string) => DesignTeam
+  renameTeam: (id: string, name: string) => void
+  deleteTeam: (id: string) => void
+  setActiveTeam: (id: string) => void
+  replaceTeams: (teams: DesignTeam[], activeTeamId?: string) => void
   setCompactDensity: (compact: boolean) => void
   setTheme: (theme: ThemeMode) => void
   addProject: (name: string) => void
@@ -41,13 +48,65 @@ export const useDesignStore = create<DesignState>()(
     (set) => ({
       projects: initialProjects,
       activeProjectId: '',
+      teams: [],
+      activeTeamId: '',
       sidebarCollapsed: false,
       workspaceName: 'My workspace',
       compactDensity: false,
       theme: 'system',
       setActiveProject: (id) => set({ activeProjectId: id }),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-      setWorkspaceName: (name) => set({ workspaceName: name }),
+      setWorkspaceName: (name) =>
+        set((state) => ({
+          workspaceName: name,
+          teams: state.teams.map((team) => (team.id === state.activeTeamId ? { ...team, name } : team)),
+        })),
+      addTeam: (name) => {
+        const team: DesignTeam = {
+          id: `team-${crypto.randomUUID()}`,
+          name,
+          createdAt: new Date().toISOString(),
+        }
+        set((state) => ({
+          teams: [...state.teams, team],
+          activeTeamId: team.id,
+          workspaceName: team.name,
+        }))
+        return team
+      },
+      renameTeam: (id, name) =>
+        set((state) => ({
+          teams: state.teams.map((team) => (team.id === id ? { ...team, name } : team)),
+          ...(state.activeTeamId === id ? { workspaceName: name } : {}),
+        })),
+      deleteTeam: (id) =>
+        set((state) => {
+          const teams = state.teams.filter((team) => team.id !== id)
+          const nextActive = state.activeTeamId === id ? (teams[0] ?? null) : (teams.find((team) => team.id === state.activeTeamId) ?? teams[0] ?? null)
+          return {
+            teams,
+            activeTeamId: nextActive?.id ?? '',
+            workspaceName: nextActive?.name ?? 'My workspace',
+          }
+        }),
+      setActiveTeam: (id) =>
+        set((state) => {
+          const target = state.teams.find((team) => team.id === id)
+          if (!target) return state
+          return { activeTeamId: target.id, workspaceName: target.name }
+        }),
+      replaceTeams: (teams, activeTeamId) =>
+        set((state) => {
+          const resolvedId = activeTeamId !== undefined
+            ? activeTeamId
+            : (teams.some((team) => team.id === state.activeTeamId) ? state.activeTeamId : (teams[0]?.id ?? ''))
+          const activeTeam = teams.find((team) => team.id === resolvedId) ?? teams[0]
+          return {
+            teams,
+            activeTeamId: activeTeam?.id ?? '',
+            workspaceName: activeTeam?.name ?? state.workspaceName,
+          }
+        }),
       setCompactDensity: (compact) => set({ compactDensity: compact }),
       setTheme: (theme) => set({ theme }),
       addProject: (name) =>

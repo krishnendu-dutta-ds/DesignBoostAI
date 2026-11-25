@@ -1,3 +1,8 @@
+export type DesignTeam = {
+  id: string
+  name: string
+  createdAt: string
+}
 export type ColorToken = { name: string; value: string; category: string }
 export type GradientSettings = {
   type: 'linear' | 'radial'

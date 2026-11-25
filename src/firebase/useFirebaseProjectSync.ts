@@ -8,20 +8,38 @@ import {
   type DocumentData,
   type QuerySnapshot,
 } from 'firebase/firestore'
-import type { DesignProject } from '../types'
+import type { DesignProject, DesignTeam } from '../types'
 import { useDesignStore } from '../store/useDesignStore'
 import { firebaseDb } from './client'
 import { isDesignProject, normalizeProject } from '../utils/projectExport'
 
 type SyncStatus = 'loading' | 'syncing' | 'synced' | 'error'
 type ProjectMap = Map<string, DesignProject>
-type LocalWorkspace = { projects: DesignProject[]; activeProjectId: string }
+type TeamMap = Map<string, DesignTeam>
+type LocalWorkspace = { projects: DesignProject[]; activeProjectId: string; teams: DesignTeam[]; activeTeamId: string }
 type WriteOperation =
   | { kind: 'set'; id: string; project: DesignProject }
   | { kind: 'delete'; id: string }
 
 const workspaceOwnerKey = 'designboost-workspace-owner'
 const workspaceCachePrefix = 'designboost-workspace-user-'
+
+function isDesignTeam(value: unknown): value is DesignTeam {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && 'id' in value && typeof value.id === 'string' && value.id.trim()
+    && 'name' in value && typeof value.name === 'string' && value.name.trim(),
+  )
+}
+
+function normalizeTeam(team: DesignTeam): DesignTeam {
+  return {
+    id: team.id,
+    name: team.name.trim(),
+    createdAt: typeof team.createdAt === 'string' && team.createdAt ? team.createdAt : new Date().toISOString(),
+  }
+}
 
 function readWorkspaceCache(uid: string): LocalWorkspace | null {
   const cached = window.localStorage.getItem(`${workspaceCachePrefix}${uid}`)
@@ -37,16 +55,24 @@ function readWorkspaceCache(uid: string): LocalWorkspace | null {
   const activeProjectId = 'activeProjectId' in parsed && typeof parsed.activeProjectId === 'string'
     ? parsed.activeProjectId
     : ''
+  const teams = 'teams' in parsed && Array.isArray(parsed.teams)
+    ? parsed.teams.filter(isDesignTeam).map(normalizeTeam)
+    : []
+  const activeTeamId = 'activeTeamId' in parsed && typeof parsed.activeTeamId === 'string'
+    ? parsed.activeTeamId
+    : (teams[0]?.id ?? '')
   return {
     projects: parsed.projects.map(normalizeProject),
     activeProjectId,
+    teams,
+    activeTeamId,
   }
 }
 
-function writeWorkspaceCache(uid: string, projects: DesignProject[], activeProjectId: string) {
+function writeWorkspaceCache(uid: string, projects: DesignProject[], activeProjectId: string, teams: DesignTeam[], activeTeamId: string) {
   window.localStorage.setItem(
     `${workspaceCachePrefix}${uid}`,
-    JSON.stringify({ projects, activeProjectId }),
+    JSON.stringify({ projects, activeProjectId, teams, activeTeamId }),
   )
 }
 
@@ -132,6 +158,8 @@ export function useFirebaseProjectSync(user: User) {
 
     let accountLocalProjects: DesignProject[]
     let accountActiveProjectId: string
+    let accountLocalTeams: DesignTeam[]
+    let accountActiveTeamId: string
     let localCacheError = ''
     let localOwnershipVerified = false
     let localBelongsToCurrentUser = false
@@ -141,17 +169,22 @@ export function useFirebaseProjectSync(user: User) {
       localBelongsToCurrentUser = owner === null || owner === user.uid
       const localState = useDesignStore.getState()
       if (owner && owner !== user.uid) {
-        writeWorkspaceCache(owner, localState.projects, localState.activeProjectId)
+        writeWorkspaceCache(owner, localState.projects, localState.activeProjectId, localState.teams, localState.activeTeamId)
         const accountCache = readWorkspaceCache(user.uid)
         accountLocalProjects = accountCache?.projects ?? []
         accountActiveProjectId = accountCache?.activeProjectId ?? ''
+        accountLocalTeams = accountCache?.teams ?? []
+        accountActiveTeamId = accountCache?.activeTeamId ?? ''
       } else {
         accountLocalProjects = localState.projects
         accountActiveProjectId = localState.activeProjectId
+        accountLocalTeams = localState.teams
+        accountActiveTeamId = localState.activeTeamId
       }
       window.localStorage.setItem(workspaceOwnerKey, user.uid)
-      writeWorkspaceCache(user.uid, accountLocalProjects, accountActiveProjectId)
+      writeWorkspaceCache(user.uid, accountLocalProjects, accountActiveProjectId, accountLocalTeams, accountActiveTeamId)
       useDesignStore.getState().replaceProjects(accountLocalProjects, accountActiveProjectId)
+      useDesignStore.getState().replaceTeams(accountLocalTeams, accountActiveTeamId)
       setSafeToRender(true)
     } catch (cacheError) {
       setError(errorMessage(cacheError))
@@ -188,16 +221,73 @@ export function useFirebaseProjectSync(user: User) {
       else setRetryVersion((version) => version + 1)
     }
 
+    const teamsCollection = collection(firebaseDb, 'users', user.uid, 'teams')
+    let lastSyncedTeams: TeamMap = new Map()
+    const syncTeamsToFirestore = async (teams: DesignTeam[]) => {
+      if (!firebaseDb) return
+      try {
+        const nextMap: TeamMap = new Map(teams.map((team) => [team.id, normalizeTeam(team)]))
+        const batch = writeBatch(firebaseDb)
+        let hasChanges = false
+        for (const [id, team] of nextMap) {
+          if (JSON.stringify(team) !== JSON.stringify(lastSyncedTeams.get(id))) {
+            batch.set(doc(teamsCollection, encodeURIComponent(id)), team)
+            hasChanges = true
+          }
+        }
+        for (const id of lastSyncedTeams.keys()) {
+          if (!nextMap.has(id)) {
+            batch.delete(doc(teamsCollection, encodeURIComponent(id)))
+            hasChanges = true
+          }
+        }
+        if (hasChanges) {
+          await batch.commit()
+          lastSyncedTeams = nextMap
+        }
+      } catch {
+        // Keep local per-user team cache working even if Firestore rules do not yet allow /teams.
+      }
+    }
+
+    const unsubscribeTeamsSnapshot = onSnapshot(
+      teamsCollection,
+      (snapshot) => {
+        const remoteTeams = snapshot.docs
+          .map((teamDoc) => teamDoc.data())
+          .filter(isDesignTeam)
+          .map(normalizeTeam)
+        lastSyncedTeams = new Map(remoteTeams.map((team) => [team.id, team]))
+        const currentTeams = useDesignStore.getState().teams
+        if (remoteTeams.length > 0 && JSON.stringify(remoteTeams) !== JSON.stringify(currentTeams)) {
+          useDesignStore.getState().replaceTeams(remoteTeams)
+        } else if (remoteTeams.length === 0 && currentTeams.length > 0) {
+          void syncTeamsToFirestore(currentTeams)
+        }
+      },
+      () => {
+        // Ignore permission errors on optional /teams subcollection.
+      },
+    )
+
     const unsubscribeStore = useDesignStore.subscribe((state, previousState) => {
-      if (state.projects !== previousState.projects || state.activeProjectId !== previousState.activeProjectId) {
+      if (
+        state.projects !== previousState.projects
+        || state.activeProjectId !== previousState.activeProjectId
+        || state.teams !== previousState.teams
+        || state.activeTeamId !== previousState.activeTeamId
+      ) {
         try {
-          writeWorkspaceCache(user.uid, state.projects, state.activeProjectId)
+          writeWorkspaceCache(user.uid, state.projects, state.activeProjectId, state.teams, state.activeTeamId)
           localCacheError = ''
         } catch (cacheError) {
           localCacheError = errorMessage(cacheError)
           setError(`Could not save the local recovery copy: ${localCacheError}`)
           setStatus('error')
         }
+      }
+      if (state.teams !== previousState.teams) {
+        void syncTeamsToFirestore(state.teams)
       }
       if (state.projects !== previousState.projects && initialized.current) scheduleSave()
     })
@@ -242,7 +332,8 @@ export function useFirebaseProjectSync(user: User) {
               : (merged[0]?.id ?? '')
             useDesignStore.getState().replaceProjects(merged, activeId)
             try {
-              writeWorkspaceCache(user.uid, merged, activeId)
+              const state = useDesignStore.getState()
+              writeWorkspaceCache(user.uid, merged, activeId, state.teams, state.activeTeamId)
               localCacheError = ''
             } catch (cacheError) {
               localCacheError = errorMessage(cacheError)
@@ -295,6 +386,7 @@ export function useFirebaseProjectSync(user: User) {
       disposed = true
       unsubscribeStore()
       unsubscribeSnapshot()
+      unsubscribeTeamsSnapshot()
     }
   }, [retryVersion, user.uid])
 

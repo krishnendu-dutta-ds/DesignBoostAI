@@ -5,12 +5,13 @@ import { Blocks, LoaderCircle } from 'lucide-react'
 import { AppShell } from './components/layout/AppShell'
 import { firebaseAuth, firebaseConfigured, signInWithGoogle, signOutFromFirebase } from './firebase/client'
 import { useFirebaseProjectSync } from './firebase/useFirebaseProjectSync'
+import { useDesignStore } from './store/useDesignStore'
 import {
   AccessibilityPage,
   ColorStudioPage,
   DashboardPage,
+  DesignAuditPage,
   ProjectsPage,
-  SavedSystemsPage,
   SettingsPage,
   SpacingStudioPage,
   TokensPage,
@@ -75,8 +76,53 @@ function WorkspaceUnavailableScreen({ error, onRetry, onSignOut }: { error: stri
   </section></main>
 }
 
+function CreateDesignTeamScreen({ user, onCreate, onSignOut }: { user: User; onCreate: (name: string) => void; onSignOut: () => void }) {
+  const [teamName, setTeamName] = useState('')
+  const [error, setError] = useState('')
+  const previewName = teamName.trim() || 'KD Design Team'
+  const previewInitial = previewName.charAt(0).toUpperCase()
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
+    const trimmed = teamName.trim()
+    if (!trimmed) {
+      setError('Please enter a design team name to continue.')
+      return
+    }
+    onCreate(trimmed)
+  }
+
+  return <main className="firebase-screen"><section className="firebase-card">
+    <AuthBrand />
+    <h1>Create your design team</h1>
+    <p>Signed in as {user.email || user.displayName || 'Google user'}. Name your first design team to set up your workspace.</p>
+    <div className="team-onboarding-preview" aria-hidden="true">
+      <span className="workspace-avatar">{previewInitial}</span>
+      <span className="workspace-copy"><strong>{previewName}</strong><small>Personal workspace</small></span>
+    </div>
+    <form className="team-onboarding-form" onSubmit={handleSubmit}>
+      <label className="field-label" htmlFor="first-design-team">Design team name</label>
+      <input
+        id="first-design-team"
+        className="field-control"
+        placeholder="e.g. KD Design Team"
+        value={teamName}
+        onChange={(event) => { setTeamName(event.target.value); if (error) setError('') }}
+        autoFocus
+        maxLength={48}
+        required
+      />
+      {error && <div className="firebase-auth-error" role="alert">{error}</div>}
+      <button type="submit" className="button-primary firebase-sign-in">Continue to workspace</button>
+    </form>
+    <button type="button" className="button-secondary firebase-sign-out" onClick={onSignOut}>Sign out</button>
+  </section></main>
+}
+
 function AuthenticatedWorkspace({ user, authError }: { user: User; authError: string }) {
   const { status, error, ready, safeToRender, retry } = useFirebaseProjectSync(user)
+  const teams = useDesignStore((state) => state.teams)
+  const addTeam = useDesignStore((state) => state.addTeam)
   const [signOutError, setSignOutError] = useState('')
 
   const handleSignOut = () => {
@@ -91,6 +137,13 @@ function AuthenticatedWorkspace({ user, authError }: { user: User; authError: st
     return <WorkspaceUnavailableScreen
       error={error || signOutError || authError}
       onRetry={retry}
+      onSignOut={handleSignOut}
+    />
+  }
+  if (teams.length === 0) {
+    return <CreateDesignTeamScreen
+      user={user}
+      onCreate={(name) => addTeam(name)}
       onSignOut={handleSignOut}
     />
   }
@@ -109,9 +162,9 @@ function AuthenticatedWorkspace({ user, authError }: { user: User; authError: st
         <Route path="typography" element={<TypographyStudioPage />} />
         <Route path="spacing" element={<SpacingStudioPage />} />
         <Route path="accessibility" element={<AccessibilityPage />} />
+        <Route path="audit" element={<DesignAuditPage />} />
         <Route path="tokens" element={<TokensPage />} />
         <Route path="projects" element={<ProjectsPage />} />
-        <Route path="systems" element={<SavedSystemsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

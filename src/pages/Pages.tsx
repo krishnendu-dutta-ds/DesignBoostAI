@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowRight, Check, ChevronDown, Copy, Download, Eye, FolderKanban,
-  LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Plus, Search, Sparkles, Sun, Trash2, Type, Upload, X,
+  ArrowRight, Check, CheckCircle2, ChevronDown, Copy, Download, Eye, FolderKanban, Gauge,
+  Info, LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Plus, Search, Sparkles, Sun, Trash2, TriangleAlert, Type, Upload, X,
 } from 'lucide-react'
 import { useDesignStore } from '../store/useDesignStore'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
@@ -31,6 +31,26 @@ function useNotice() {
   return { notice, notify }
 }
 
+function useDismissibleMenu(open: boolean, onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const handlePointerDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose()
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open, onClose])
+  return ref
+}
+
 async function copyText(value: string, label: string, notify: (message: string) => void) {
   try {
     await navigator.clipboard.writeText(value)
@@ -53,8 +73,6 @@ export function DashboardPage() {
   const projects = useDesignStore((state) => state.projects)
   const recentProjects = [...projects].sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
   const active = useDesignStore((state) => state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0])
-  const setActive = useDesignStore((state) => state.setActiveProject)
-  const { notice, notify } = useNotice()
   const stats = [
     { label: 'Design systems', value: projects.length.toString(), detail: 'In this workspace', icon: FolderKanban },
     { label: 'Colors', value: projects.reduce((total, project) => total + project.colors.length, 0).toString(), detail: 'Across your systems', icon: Palette },
@@ -79,10 +97,10 @@ export function DashboardPage() {
       <div className="stat-grid">{stats.map(({ label, value, detail, icon: Icon }) => <article className="stat-card" key={label}><div className="stat-top"><span>{label}</span><Icon size={17} /></div><div className="stat-value">{value}</div><div className="stat-change">{detail}</div></article>)}</div>
       <div className="dashboard-grid">
         <Panel title="Recent projects" description="Your latest design systems." action={<Link className="text-link" to="/projects">View all <ArrowRight size={14} /></Link>} className="recent-panel">
-          <div className="project-list">{recentProjects.slice(0, 3).map((project) => <button key={project.id} className={`project-row ${active?.id === project.id ? 'selected' : ''}`} onClick={() => { setActive(project.id); notify(`${project.name} selected`) }}>
+          <div className="project-list">{recentProjects.slice(0, 3).map((project) => <Link key={project.id} to="/projects" className={`project-row ${active?.id === project.id ? 'selected' : ''}`}>
             <div className="project-thumb">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} />) : <LayoutGrid size={18} />}</div>
             <div className="project-details"><strong>{project.name}</strong><span>{project.colors.length} colors <i /> {project.tokens.length} tokens</span></div>
-          </button>)}</div>
+          </Link>)}</div>
         </Panel>
         <Panel title="Keep building" description="Make the next decision for your system." className="quick-panel">
           <div className="quick-actions">{quickActions.map(({ title, desc, icon: Icon, to, tone }) => <Link className="quick-action" to={to} key={title}><span className={`quick-icon ${tone}`}><Icon size={17} /></span><span><strong>{title}</strong><small>{desc}</small></span><ArrowRight size={15} /></Link>)}</div>
@@ -92,7 +110,6 @@ export function DashboardPage() {
         <div className="overview-preview"><div className="overview-copy"><span className="preview-label">COLORS</span><div className="palette-strip">{active.colors.slice(0, 7).map((color) => <span key={color.name} style={{ backgroundColor: color.value }} title={`${color.name} ${color.value}`} />)}</div><span className="preview-label">TYPEFACE</span><div className="type-preview"><strong>Aa</strong><span><b>{active.settings?.typography.fontFamily ?? 'No typeface set'}</b><small>{active.settings?.typography.fontWeight ?? 'Not set'}</small></span></div></div><div className="overview-card"><span className="mini-pill">{active.colors.length} colors</span><strong>{active.tokens.length} tokens</strong><small>Saved in this design system</small></div></div>
       </Panel>}
     </>}
-    {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
   </div>
 }
 
@@ -106,6 +123,7 @@ export function ColorStudioPage() {
   const [mode, setMode] = useState('All colors')
   const [valueFormat, setValueFormat] = useState<'HEX' | 'RGB' | 'HSL'>('HEX')
   const [paletteMenuOpen, setPaletteMenuOpen] = useState(false)
+  const paletteMenuRef = useDismissibleMenu(paletteMenuOpen, () => setPaletteMenuOpen(false))
   const [colorDrafts, setColorDrafts] = useState<Record<string, string>>({})
   const { notice, notify } = useNotice()
   const colors = project?.colors ?? []
@@ -153,7 +171,7 @@ export function ColorStudioPage() {
         <strong>{palette.name}</strong><small>{palette.description}</small><span className="palette-apply-label">{activePaletteName === palette.name ? 'Applied' : 'Apply palette'} <ArrowRight size={12} /></span>
       </button>)}</div>
     </Panel>
-    <div className="toolbar-row"><div className="tabs">{['All colors', 'Brand', 'Surface', 'Text', 'Status', 'Generated'].map((tab) => <button className={mode === tab ? 'tab-active' : ''} key={tab} onClick={() => setMode(tab)}>{tab}</button>)}</div><div className="toolbar-actions"><div className={`dropdown-wrap palette-generator ${paletteMenuOpen ? 'menu-open' : ''}`}><button className="button-secondary compact" aria-expanded={paletteMenuOpen} onClick={() => setPaletteMenuOpen(!paletteMenuOpen)}><Sparkles size={14} /> Generate palette <ChevronDown size={13} /></button><div className="export-menu">{(['Tints', 'Shades', 'Complementary', 'Analogous', 'Monochromatic', 'Triadic'] as const).map((kind) => <button key={kind} onClick={() => { generate(kind); setPaletteMenuOpen(false) }}>{kind}</button>)}</div></div><div className="format-switch">{(['HEX', 'RGB', 'HSL'] as const).map((format) => <button key={format} className={valueFormat === format ? 'selected' : ''} onClick={() => setValueFormat(format)}>{format}</button>)}</div><button className="icon-button bordered" title="Export JSON" onClick={() => exportColors('json')}><Download size={15} /></button></div></div>
+    <div className="toolbar-row"><div className="tabs">{['All colors', 'Brand', 'Surface', 'Text', 'Status', 'Generated'].map((tab) => <button className={mode === tab ? 'tab-active' : ''} key={tab} onClick={() => setMode(tab)}>{tab}</button>)}</div><div className="toolbar-actions"><div ref={paletteMenuRef} className={`dropdown-wrap palette-generator ${paletteMenuOpen ? 'menu-open' : ''}`}><button className="button-secondary compact" aria-expanded={paletteMenuOpen} onClick={() => setPaletteMenuOpen(!paletteMenuOpen)}><Sparkles size={14} /> Generate palette <ChevronDown size={13} /></button><div className="export-menu">{(['Tints', 'Shades', 'Complementary', 'Analogous', 'Monochromatic', 'Triadic'] as const).map((kind) => <button key={kind} onClick={() => { generate(kind); setPaletteMenuOpen(false) }}>{kind}</button>)}</div></div><div className="format-switch">{(['HEX', 'RGB', 'HSL'] as const).map((format) => <button key={format} className={valueFormat === format ? 'selected' : ''} onClick={() => setValueFormat(format)}>{format}</button>)}</div><button className="icon-button bordered" title="Export JSON" onClick={() => exportColors('json')}><Download size={15} /></button></div></div>
     <div className="color-grid">{filtered.map((color) => {
       const originalIndex = colors.indexOf(color)
       const rgb = rgbFromHex(color.value)
@@ -338,6 +356,7 @@ export function TokensPage() {
   const [value, setValue] = useState('')
   const [tokenGroup, setTokenGroup] = useState('Colors')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const exportMenuRef = useDismissibleMenu(exportMenuOpen, () => setExportMenuOpen(false))
   const [previewFontStatus, setPreviewFontStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const { notice, notify } = useNotice()
   const tokens = project?.tokens ?? []
@@ -419,7 +438,7 @@ export function TokensPage() {
     setValue('')
     notify('Token added to your system')
   }
-  return <div className="page"><PageTitle eyebrow="DESIGN SYSTEM / TOKENS" title="Design tokens" description="Review studio values and token variables in one place before exporting."><div className={`dropdown-wrap ${exportMenuOpen ? 'menu-open' : ''}`}><button type="button" className="button-secondary" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen((open) => !open)}><Download size={15} /> Export tokens <ChevronDown size={13} /></button><div className="export-menu">{['CSS', 'JSON', 'SCSS', 'Tailwind'].map((format) => <button type="button" key={format} onClick={() => { exportTokens(format); setExportMenuOpen(false) }}>{format} format</button>)}</div></div></PageTitle>
+  return <div className="page"><PageTitle eyebrow="DESIGN SYSTEM / TOKENS" title="Design tokens" description="Review studio values and token variables in one place before exporting."><div ref={exportMenuRef} className={`dropdown-wrap ${exportMenuOpen ? 'menu-open' : ''}`}><button type="button" className="button-secondary" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen((open) => !open)}><Download size={15} /> Export tokens <ChevronDown size={13} /></button><div className="export-menu">{['CSS', 'JSON', 'SCSS', 'Tailwind'].map((format) => <button type="button" key={format} onClick={() => { exportTokens(format); setExportMenuOpen(false) }}>{format} format</button>)}</div></div></PageTitle>
     <Panel title="Studio values" description="Live values from Color Studio, Typography, and Spacing. Check this preview before exporting Figma variables." className="token-review-panel">
       <div className="token-review-grid">
         <section className="token-review-card"><h3>Colors <span>{colors.length}</span></h3>{colors.length ? <div className="token-review-color-list">{colors.map((color, index) => <div className="token-review-color" key={`${color.name}-${color.value}-${index}`}><i style={{ backgroundColor: color.value }} /><span>{color.name}</span><code>{color.value}</code></div>)}</div> : <p className="token-review-empty">No colors set in Color Studio yet.</p>}</section>
@@ -445,8 +464,34 @@ export function ProjectsPage() {
   const setActiveProject = useDesignStore((state) => state.setActiveProject)
   const replaceProjects = useDesignStore((state) => state.replaceProjects)
   const [name, setName] = useState('')
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const { notice, notify } = useNotice()
+  useEffect(() => {
+    if (!openMenuId) return
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target?.closest('.project-card-art')) {
+        setOpenMenuId(null)
+        setConfirmDeleteId(null)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenMenuId(null)
+        setConfirmDeleteId(null)
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [openMenuId])
   const createProject = (event: React.FormEvent) => {
     event.preventDefault()
     if (!name.trim()) return
@@ -493,39 +538,46 @@ export function ProjectsPage() {
   return <div className="page"><PageTitle eyebrow="WORKSPACE / PROJECTS" title="Your projects" description="Manage design systems for every product and team."><label className="button-secondary file-button"><Upload size={15} /> Restore / import JSON<input type="file" accept="application/json,.json" onChange={(event) => { importFile(event.target.files?.[0]); event.currentTarget.value = '' }} /></label></PageTitle>
     <form className="create-project-bar" onSubmit={createProject}><span className="new-project-icon"><Plus size={18} /></span><div><strong>Start a new design system</strong><small>Set up a shared foundation for your next product.</small></div><input ref={inputRef} className="field-control" placeholder="Name your project..." value={name} onChange={(event) => setName(event.target.value)} required /><button className="button-primary" type="submit"><Plus size={15} /> Create</button></form>
     <div className="projects-heading"><div><h2>All projects <span>{projects.length}</span></h2><p>Saved to your cloud account</p></div><span className="select-small">Sorted by last modified</span></div>
-    <div className="projects-grid">{sortedProjects.map((project) => <article className={`project-card ${activeProjectId === project.id ? 'current' : ''}`} key={project.id}><div className="project-card-art"><div className="project-art-swatches">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} title={color.name} />) : <span>No colors added yet</span>}</div><button className="icon-button art-menu" title="More project actions" onClick={(event) => event.currentTarget.parentElement?.classList.toggle('menu-open')}><MoreHorizontal size={17} /></button><div className="project-menu"><button onClick={() => { const next = window.prompt('Rename design system', project.name); if (next?.trim()) { renameProject(project.id, next.trim()); notify('Project renamed; syncing to your account') } }}>Rename</button><button onClick={() => { duplicateProject(project.id); notify('Project duplicated; syncing to your account') }}>Duplicate</button><button className="danger-text" onClick={() => { if (window.confirm(`Delete “${project.name}”? This cannot be undone.`)) { deleteProject(project.id); notify('Project deleted; syncing to your account') } }}>Delete</button></div></div><div className="project-card-body"><div className="project-card-title"><h3>{project.name}</h3>{activeProjectId === project.id && <span className="active-badge">Active</span>}</div><p>{project.colors.length} colors <i /> {project.tokens.length} tokens <i /> Edited {new Date(project.updatedAt).toLocaleDateString()}</p><div className="project-card-bottom"><div className="mini-palette">{project.colors.slice(0, 6).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><button className="button-secondary compact" onClick={() => { setActiveProject(project.id); notify(`${project.name} is now active`) }}>Open project <ArrowRight size={13} /></button></div></div></article>)}</div>
+    <div className="projects-grid">{sortedProjects.map((project) => <article className={`project-card ${activeProjectId === project.id ? 'current' : ''}`} key={project.id}><div className={`project-card-art ${openMenuId === project.id ? 'menu-open' : ''}`}><div className="project-art-swatches">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} title={color.name} />) : <span>No colors added yet</span>}</div><button type="button" className="icon-button art-menu" aria-expanded={openMenuId === project.id} title="More project actions" onClick={() => { setOpenMenuId((current) => current === project.id ? null : project.id); setConfirmDeleteId(null) }}><MoreHorizontal size={17} /></button><div className="project-menu"><button type="button" onClick={() => { setRenamingId(project.id); setRenameDraft(project.name); setOpenMenuId(null) }}>Rename</button><button type="button" onClick={() => { duplicateProject(project.id); setOpenMenuId(null); notify('Project duplicated; syncing to your account') }}>Duplicate</button>{confirmDeleteId === project.id ? <button type="button" className="danger-text" onClick={() => { deleteProject(project.id); setOpenMenuId(null); setConfirmDeleteId(null); notify('Project deleted; syncing to your account') }}>Confirm delete</button> : <button type="button" className="danger-text" onClick={() => setConfirmDeleteId(project.id)}>Delete</button>}</div></div><div className="project-card-body"><div className="project-card-title">{renamingId === project.id ? <form className="inline-rename-form" onSubmit={(event) => { event.preventDefault(); if (renameDraft.trim()) { renameProject(project.id, renameDraft.trim()); notify('Project renamed; syncing to your account') } setRenamingId(null) }}><input className="field-control compact-input" autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenamingId(null) }} /><button type="submit" className="button-primary compact">Save</button><button type="button" className="button-secondary compact" onClick={() => setRenamingId(null)}>Cancel</button></form> : <><h3>{project.name}</h3>{activeProjectId === project.id && <span className="active-badge">Active</span>}</>}</div><p>{project.colors.length} colors <i /> {project.tokens.length} tokens <i /> Edited {new Date(project.updatedAt).toLocaleDateString()}</p><div className="project-card-bottom"><div className="mini-palette">{project.colors.slice(0, 6).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div>{activeProjectId === project.id ? <button type="button" className="button-primary compact" disabled aria-current="true"><Check size={13} /> Active</button> : <button type="button" className="button-secondary compact" onClick={() => { setActiveProject(project.id); notify(`${project.name} is now active`) }}>Set active <ArrowRight size={13} /></button>}</div></div></article>)}</div>
     {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}</div>
-}
-
-export function SavedSystemsPage() {
-  const projects = useDesignStore((state) => state.projects)
-  const active = useDesignStore((state) => state.activeProjectId)
-  const setActive = useDesignStore((state) => state.setActiveProject)
-  return <div className="page"><PageTitle eyebrow="WORKSPACE / LIBRARY" title="Saved systems" description="Your reusable design foundations, ready to bring into any project." /><div className="saved-system-grid">{projects.map((project) => <button className={`saved-system-card ${active === project.id ? 'selected' : ''}`} key={project.id} onClick={() => setActive(project.id)}><div className="saved-system-colors">{project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><strong>{project.name}</strong><span>{project.tokens.length} tokens · {project.colors.length} colors</span><div className="saved-system-footer"><span>{active === project.id ? 'Currently active' : 'Click to switch system'}</span><ArrowRight size={14} /></div></button>)}</div><div className="info-banner"><Sparkles size={16} /><span>Your systems sync across your devices. Export a JSON backup from the top bar for an offline copy.</span></div></div>
 }
 
 export function SettingsPage() {
   const projects = useDesignStore((state) => state.projects)
   const active = useDesignStore((state) => state.projects.find((project) => project.id === state.activeProjectId))
+  const teams = useDesignStore((state) => state.teams)
+  const activeTeamId = useDesignStore((state) => state.activeTeamId)
+  const addTeam = useDesignStore((state) => state.addTeam)
+  const deleteTeam = useDesignStore((state) => state.deleteTeam)
+  const setActiveTeam = useDesignStore((state) => state.setActiveTeam)
   const workspaceName = useDesignStore((state) => state.workspaceName)
   const setWorkspaceName = useDesignStore((state) => state.setWorkspaceName)
   const compact = useDesignStore((state) => state.compactDensity)
   const setCompact = useDesignStore((state) => state.setCompactDensity)
   const theme = useDesignStore((state) => state.theme)
   const setTheme = useDesignStore((state) => state.setTheme)
+  const activeTeam = teams.find((team) => team.id === activeTeamId) ?? teams[0]
+  const activeTeamName = activeTeam?.name ?? workspaceName
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [profileDraft, setProfileDraft] = useState(activeTeamName)
+  const [newTeamName, setNewTeamName] = useState('')
   const { notice, notify } = useNotice()
-  useEffect(() => {
-    document.documentElement.classList.toggle('compact-density', compact)
-  }, [compact])
-  const editWorkspaceName = () => {
-    const nextName = window.prompt('Workspace name', workspaceName)
-    if (nextName === null) return
-    if (!nextName.trim()) {
-      notify('Workspace name cannot be empty')
+  const saveWorkspaceName = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!profileDraft.trim()) {
+      notify('Design team name cannot be empty')
       return
     }
-    setWorkspaceName(nextName.trim())
-    notify('Workspace name saved')
+    setWorkspaceName(profileDraft.trim())
+    setEditingProfile(false)
+    notify('Design team name saved')
+  }
+  const createTeam = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!newTeamName.trim()) return
+    const created = addTeam(newTeamName.trim())
+    setNewTeamName('')
+    notify(`${created.name} created`)
   }
   return <div className="page">
     <PageTitle eyebrow="WORKSPACE / PREFERENCES" title="Settings" description="Make your workspace feel like yours." />
@@ -533,15 +585,40 @@ export function SettingsPage() {
       <div className="settings-main">
         <Panel title="Workspace profile" description="The basics of your DesignBoost workspace.">
           <div className="settings-profile">
-            <span className="settings-avatar">D</span>
-            <div><strong>{workspaceName}</strong><small>Personal workspace · {projects.length} projects</small></div>
-            <button type="button" className="button-secondary" onClick={editWorkspaceName}>Edit profile</button>
+            <span className="settings-avatar">{activeTeamName.charAt(0).toUpperCase() || 'D'}</span>
+            {editingProfile ? <form className="inline-rename-form" onSubmit={saveWorkspaceName}>
+              <input className="field-control compact-input" autoFocus value={profileDraft} onChange={(event) => setProfileDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setEditingProfile(false) }} />
+              <button type="submit" className="button-primary compact">Save</button>
+              <button type="button" className="button-secondary compact" onClick={() => setEditingProfile(false)}>Cancel</button>
+            </form> : <>
+              <div><strong>{activeTeamName}</strong><small>{teams.length > 1 ? `${teams.length} design teams` : 'Personal workspace'} · {projects.length} projects</small></div>
+              <button type="button" className="button-secondary" onClick={() => { setProfileDraft(activeTeamName); setEditingProfile(true) }}>Rename team</button>
+            </>}
           </div>
           <div className="settings-row">
-            <div><b>Active design system</b><small>Default project for new design work.</small></div>
-            <select className="field-control" value={active?.id ?? ''} disabled={!projects.length} onChange={(event) => useDesignStore.getState().setActiveProject(event.target.value)}>
-              {projects.length ? projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>) : <option value="">No projects yet</option>}
-            </select>
+            <div><b>Active design system</b><small>{active ? `Currently using ${active.name}` : 'No active project selected'}</small></div>
+            <Link to="/projects" className="button-secondary compact">Manage in My projects <ArrowRight size={13} /></Link>
+          </div>
+        </Panel>
+        <Panel title="Design teams" description="Create multiple design teams, switch between them, or remove teams you no longer need.">
+          <form className="settings-team-create" onSubmit={createTeam}>
+            <input className="field-control" placeholder="New design team name..." value={newTeamName} onChange={(event) => setNewTeamName(event.target.value)} maxLength={48} required />
+            <button type="submit" className="button-primary"><Plus size={15} /> Create team</button>
+          </form>
+          <div className="settings-team-list">
+            {teams.map((team) => (
+              <div key={team.id} className={`settings-team-item ${team.id === activeTeam?.id ? 'active' : ''}`}>
+                <button type="button" className="settings-team-select" onClick={() => { setActiveTeam(team.id); notify(`Switched to ${team.name}`) }}>
+                  <span className="workspace-team-badge">{team.name.charAt(0).toUpperCase()}</span>
+                  <span><strong>{team.name}</strong><small>{team.id === activeTeam?.id ? 'Active team' : 'Click to switch'}</small></span>
+                </button>
+                {teams.length > 1 && (
+                  <button type="button" className="icon-button subtle danger-hover" aria-label={`Remove ${team.name}`} title={`Remove ${team.name}`} onClick={() => { deleteTeam(team.id); notify(`${team.name} removed`) }}>
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </Panel>
         <Panel title="Preferences" description="Configure how DesignBoost behaves.">
@@ -574,4 +651,315 @@ export function SettingsPage() {
     </div>
     {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
   </div>
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Design Audit Page
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TextSize  = 'normal' | 'large'
+
+interface AuditPair {
+  fgToken: string
+  fgHex:   string
+  bgToken: string
+  bgHex:   string
+  ratio:   number
+  passAA:   boolean
+  passAAA:  boolean
+  passAALg: boolean
+  passAAALg: boolean
+}
+
+function luminance(hex: string): number {
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+}
+
+function wcagRatio(hex1: string, hex2: string): number {
+  const l1 = luminance(normalizeHex(hex1) ?? '#000000')
+  const l2 = luminance(normalizeHex(hex2) ?? '#000000')
+  const lighter = Math.max(l1, l2)
+  const darker  = Math.min(l1, l2)
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+function ratioLabel(r: number) { return r.toFixed(2) + ':1' }
+
+function fixSuggestion(pair: AuditPair): string {
+  const diff = 4.5 - pair.ratio
+  if (diff <= 0) return ''
+  if (diff < 1) return `Slightly darken ${pair.fgToken} or lighten ${pair.bgToken} to reach 4.5:1`
+  if (diff < 2) return `Increase contrast of ${pair.fgToken} by ~${(diff * 20).toFixed(0)} lightness points`
+  return `Consider replacing ${pair.fgToken} with a higher-contrast token (need ≥4.5:1, have ${ratioLabel(pair.ratio)})`
+}
+
+type AuditFilter = 'all' | 'fail-aa' | 'fail-aaa' | 'pass-aa'
+
+export function DesignAuditPage() {
+  const projects = useDesignStore((s) => s.projects)
+  const activeId = useDesignStore((s) => s.activeProjectId)
+  const project  = projects.find((p) => p.id === activeId)
+  const colors   = project?.colors ?? []
+
+  const [filter, setFilter]   = useState<AuditFilter>('all')
+  const [sizeTab, setSizeTab] = useState<TextSize>('normal')
+  const { notice, notify } = useNotice()
+
+  // Build all fg × bg pairs from project color tokens
+  const allPairs = useMemo<AuditPair[]>(() => {
+    if (colors.length < 2) return []
+    const pairs: AuditPair[] = []
+    for (let i = 0; i < colors.length; i++) {
+      for (let j = 0; j < colors.length; j++) {
+        if (i === j) continue
+        const fg = colors[i]
+        const bg = colors[j]
+        try {
+          const fgHex = normalizeHex(fg.value) ?? ''
+          const bgHex = normalizeHex(bg.value) ?? ''
+          if (!fgHex || !bgHex) continue
+          const ratio = wcagRatio(fgHex, bgHex)
+          pairs.push({
+            fgToken: fg.name,
+            fgHex,
+            bgToken: bg.name,
+            bgHex,
+            ratio,
+            passAA:   ratio >= 4.5,
+            passAAA:  ratio >= 7,
+            passAALg: ratio >= 3,
+            passAAALg: ratio >= 4.5,
+          })
+        } catch { /* skip invalid hex */ }
+      }
+    }
+    // Deduplicate by sorted pair key to avoid showing A-on-B and B-on-A as separate rows
+    // (keep the row where fg is "darker" on "lighter" bg for readability)
+    const seen = new Set<string>()
+    return pairs.filter((p) => {
+      const key = [p.fgToken, p.bgToken].sort().join('||')
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, [colors])
+
+  const filtered = useMemo(() => {
+    return allPairs.filter((p) => {
+      const aa  = sizeTab === 'normal' ? p.passAA   : p.passAALg
+      const aaa = sizeTab === 'normal' ? p.passAAA  : p.passAAALg
+      if (filter === 'fail-aa')  return !aa
+      if (filter === 'fail-aaa') return !aaa
+      if (filter === 'pass-aa')  return aa
+      return true
+    })
+  }, [allPairs, filter, sizeTab])
+
+  const failAACount  = allPairs.filter((p) => sizeTab === 'normal' ? !p.passAA  : !p.passAALg).length
+  const failAAACount = allPairs.filter((p) => sizeTab === 'normal' ? !p.passAAA : !p.passAAALg).length
+  const passAACount  = allPairs.filter((p) => sizeTab === 'normal' ?  p.passAA  :  p.passAALg).length
+
+  function exportJson() {
+    const data = allPairs.map((p) => ({
+      foreground: p.fgToken, fgHex: p.fgHex,
+      background: p.bgToken, bgHex: p.bgHex,
+      ratio: p.ratio,
+      passAA_normal: p.passAA, passAAA_normal: p.passAAA,
+      passAA_large:  p.passAALg, passAAA_large:  p.passAAALg,
+    }))
+    downloadJson(`${project?.name ?? 'audit'}-design-audit.json`, data)
+    notify('Audit report downloaded as JSON')
+  }
+
+  function exportCsv() {
+    const header = 'Foreground,FG Hex,Background,BG Hex,Ratio,AA Normal,AAA Normal,AA Large,AAA Large'
+    const rows = allPairs.map((p) =>
+      [p.fgToken, p.fgHex, p.bgToken, p.bgHex, p.ratio.toFixed(2),
+       p.passAA, p.passAAA, p.passAALg, p.passAAALg].join(',')
+    )
+    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `${project?.name ?? 'audit'}-design-audit.csv`
+    a.click(); URL.revokeObjectURL(url)
+    notify('Audit report downloaded as CSV')
+  }
+
+  if (!project) {
+    return (
+      <div className="page">
+        <PageTitle eyebrow="DESIGN TOOLS / AUDIT" title="Design audit"
+          description="Automated WCAG contrast & token mismatch analysis." />
+        <div className="audit-empty">
+          <Gauge size={40} strokeWidth={1.3} />
+          <h3>No active project</h3>
+          <p>Activate a project from My Projects to run a design audit.</p>
+          <Link to="/projects" className="button-primary">Go to My projects</Link>
+        </div>
+      </div>
+    )
+  }
+
+  if (colors.length < 2) {
+    return (
+      <div className="page">
+        <PageTitle eyebrow="DESIGN TOOLS / AUDIT" title="Design audit"
+          description="Automated WCAG contrast & token mismatch analysis." />
+        <div className="audit-empty">
+          <Palette size={40} strokeWidth={1.3} />
+          <h3>Not enough color tokens</h3>
+          <p>Add at least 2 color tokens in <strong>{project.name}</strong> to run a contrast audit.</p>
+          <Link to="/colors" className="button-primary">Open Color Studio</Link>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="page">
+      <PageTitle
+        eyebrow={`DESIGN TOOLS / AUDIT · ${project.name}`}
+        title="Design audit"
+        description="Automated WCAG AA & AAA contrast analysis across your active project's color token pairs."
+      />
+
+      {/* Summary banner */}
+      <div className="audit-summary">
+        <div className="audit-summary-stat total">
+          <span className="audit-stat-value">{allPairs.length}</span>
+          <span className="audit-stat-label">Token pairs</span>
+        </div>
+        <div className="audit-summary-stat pass">
+          <span className="audit-stat-value">{passAACount}</span>
+          <span className="audit-stat-label">Pass AA</span>
+        </div>
+        <div className="audit-summary-stat fail">
+          <span className="audit-stat-value">{failAACount}</span>
+          <span className="audit-stat-label">Fail AA</span>
+        </div>
+        <div className="audit-summary-stat warn">
+          <span className="audit-stat-value">{failAAACount}</span>
+          <span className="audit-stat-label">Fail AAA</span>
+        </div>
+      </div>
+
+      {/* Controls row */}
+      <div className="audit-controls">
+        {/* Text size tab */}
+        <div className="audit-size-tabs" role="tablist" aria-label="Text size">
+          {(['normal', 'large'] as TextSize[]).map((s) => (
+            <button key={s} role="tab" aria-selected={sizeTab === s}
+              className={`audit-size-tab ${sizeTab === s ? 'active' : ''}`}
+              onClick={() => setSizeTab(s)}>
+              {s === 'normal' ? 'Normal text' : 'Large text'}
+            </button>
+          ))}
+        </div>
+
+        {/* Filter tabs */}
+        <div className="audit-filter-tabs" role="tablist" aria-label="Filter">
+          {([
+            { id: 'all',      label: 'All' },
+            { id: 'fail-aa',  label: `Fail AA (${failAACount})` },
+            { id: 'fail-aaa', label: `Fail AAA (${failAAACount})` },
+            { id: 'pass-aa',  label: `Pass AA (${passAACount})` },
+          ] as { id: AuditFilter; label: string }[]).map((tab) => (
+            <button key={tab.id} role="tab" aria-selected={filter === tab.id}
+              className={`audit-filter-tab ${filter === tab.id ? 'active' : ''}`}
+              onClick={() => setFilter(tab.id)}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Export */}
+        <div className="audit-export-group">
+          <button className="button-secondary compact" onClick={exportJson}>
+            <Download size={13} /> JSON
+          </button>
+          <button className="button-secondary compact" onClick={exportCsv}>
+            <Download size={13} /> CSV
+          </button>
+        </div>
+      </div>
+
+      {/* WCAG info banner */}
+      <div className="info-banner">
+        <span>
+          <strong>WCAG {sizeTab === 'normal' ? 'Normal text' : 'Large text'} thresholds:</strong>
+          {sizeTab === 'normal'
+            ? ' AA ≥ 4.5:1 · AAA ≥ 7:1'
+            : ' AA ≥ 3:1 · AAA ≥ 4.5:1'}
+          . Large text is defined as ≥18 pt regular or ≥14 pt bold.
+        </span>
+      </div>
+
+      {/* Results grid */}
+      {filtered.length === 0 ? (
+        <div className="audit-no-results">
+          <CheckCircle2 size={28} />
+          <p>No pairs match this filter — looking good!</p>
+        </div>
+      ) : (
+        <div className="audit-results-grid">
+          {filtered.map((pair) => {
+            const aa  = sizeTab === 'normal' ? pair.passAA   : pair.passAALg
+            const aaa = sizeTab === 'normal' ? pair.passAAA  : pair.passAAALg
+            return (
+              <article key={`${pair.fgToken}-${pair.bgToken}`}
+                className={`audit-pair-card ${!aa ? 'fail' : !aaa ? 'warn' : 'pass'}`}>
+                {/* Swatch preview */}
+                <div className="audit-swatch-pair" style={{ background: pair.bgHex }}>
+                  <span className="audit-swatch-text" style={{ color: pair.fgHex }}>Aa</span>
+                  <div className="audit-swatch-tokens">
+                    <span className="audit-token-chip fg" style={{ background: pair.fgHex }} title={pair.fgHex} />
+                    <span className="audit-token-chip bg" style={{ background: pair.bgHex }} title={pair.bgHex} />
+                  </div>
+                </div>
+
+                {/* Info */}
+                <div className="audit-pair-info">
+                  <div className="audit-token-names">
+                    <span className="audit-token-label" title={pair.fgHex}>{pair.fgToken}</span>
+                    <span className="audit-on">on</span>
+                    <span className="audit-token-label" title={pair.bgHex}>{pair.bgToken}</span>
+                  </div>
+
+                  <div className="audit-ratio-row">
+                    <span className="audit-ratio">{ratioLabel(pair.ratio)}</span>
+                    <span className={`audit-badge ${aa ? 'pass' : 'fail'}`}>
+                      {aa ? '✓' : '✗'} AA
+                    </span>
+                    <span className={`audit-badge ${aaa ? 'pass' : 'fail'}`}>
+                      {aaa ? '✓' : '✗'} AAA
+                    </span>
+                  </div>
+
+                  {!aa && (
+                    <p className="audit-fix">
+                      <TriangleAlert size={12} />
+                      {fixSuggestion(pair)}
+                    </p>
+                  )}
+                  {aa && !aaa && (
+                    <p className="audit-fix subtle">
+                      <Info size={12} />
+                      Passes AA but not AAA. Need {sizeTab === 'normal' ? '7:1' : '4.5:1'} for AAA.
+                    </p>
+                  )}
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+
+      {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
+    </div>
+  )
 }
