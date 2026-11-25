@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Link } from 'react-router-dom'
 import {
   ArrowRight, Check, CheckCircle2, ChevronDown, Copy, Download, Eye, FolderKanban, Gauge,
-  Info, LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Plus, Search, Sparkles, Sun, Trash2, TriangleAlert, Type, Upload, X,
+  Info, LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Pencil, Plus, Search, Sparkles, Sun, Trash2, TriangleAlert, Type, Upload, X,
 } from 'lucide-react'
 import { useDesignStore } from '../store/useDesignStore'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
@@ -662,8 +662,10 @@ type TextSize  = 'normal' | 'large'
 
 interface AuditPair {
   fgToken: string
+  fgIndex: number   // index in colors array
   fgHex:   string
   bgToken: string
+  bgIndex: number
   bgHex:   string
   ratio:   number
   passAA:   boolean
@@ -690,24 +692,48 @@ function wcagRatio(hex1: string, hex2: string): number {
 
 function ratioLabel(r: number) { return r.toFixed(2) + ':1' }
 
-function fixSuggestion(pair: AuditPair): string {
-  const diff = 4.5 - pair.ratio
-  if (diff <= 0) return ''
-  if (diff < 1) return `Slightly darken ${pair.fgToken} or lighten ${pair.bgToken} to reach 4.5:1`
-  if (diff < 2) return `Increase contrast of ${pair.fgToken} by ~${(diff * 20).toFixed(0)} lightness points`
-  return `Consider replacing ${pair.fgToken} with a higher-contrast token (need ≥4.5:1, have ${ratioLabel(pair.ratio)})`
+/** Adjust HSL lightness of a hex until contrast vs bgHex hits targetRatio. Max 60 steps. */
+function suggestCompliantHex(fgHex: string, bgHex: string, targetRatio: number): string {
+  const { h, s, l } = hslFromHex(fgHex)
+  const bgLum = luminance(normalizeHex(bgHex) ?? '#000000')
+  // Try darkening first, then lightening
+  for (const dir of [-1, 1]) {
+    for (let step = 1; step <= 60; step++) {
+      const newL = Math.max(0, Math.min(100, l + dir * step))
+      const candidate = hexFromHsl(h, s, newL)
+      const norm = normalizeHex(candidate) ?? candidate
+      const fgLum = luminance(norm)
+      const lighter = Math.max(fgLum, bgLum)
+      const darker  = Math.min(fgLum, bgLum)
+      if ((lighter + 0.05) / (darker + 0.05) >= targetRatio) return norm
+    }
+  }
+  return fgHex
 }
 
 type AuditFilter = 'all' | 'fail-aa' | 'fail-aaa' | 'pass-aa'
+type EditTarget  = 'fg' | 'bg'
+
+interface EditState {
+  pairKey: string
+  target:  EditTarget
+  tokenIndex: number
+  tokenName: string
+  originalHex: string
+  draftHex: string
+  targetLevel: 'AA' | 'AAA'
+}
 
 export function DesignAuditPage() {
-  const projects = useDesignStore((s) => s.projects)
-  const activeId = useDesignStore((s) => s.activeProjectId)
-  const project  = projects.find((p) => p.id === activeId)
-  const colors   = project?.colors ?? []
+  const projects    = useDesignStore((s) => s.projects)
+  const activeId    = useDesignStore((s) => s.activeProjectId)
+  const updateColor = useDesignStore((s) => s.updateColor)
+  const project     = projects.find((p) => p.id === activeId)
+  const colors      = project?.colors ?? []
 
-  const [filter, setFilter]   = useState<AuditFilter>('all')
-  const [sizeTab, setSizeTab] = useState<TextSize>('normal')
+  const [filter, setFilter]     = useState<AuditFilter>('all')
+  const [sizeTab, setSizeTab]   = useState<TextSize>('normal')
+  const [edit, setEdit]         = useState<EditState | null>(null)
   const { notice, notify } = useNotice()
 
   // Build all fg × bg pairs from project color tokens
@@ -725,10 +751,8 @@ export function DesignAuditPage() {
           if (!fgHex || !bgHex) continue
           const ratio = wcagRatio(fgHex, bgHex)
           pairs.push({
-            fgToken: fg.name,
-            fgHex,
-            bgToken: bg.name,
-            bgHex,
+            fgToken: fg.name, fgIndex: i, fgHex,
+            bgToken: bg.name, bgIndex: j, bgHex,
             ratio,
             passAA:   ratio >= 4.5,
             passAAA:  ratio >= 7,
@@ -738,8 +762,6 @@ export function DesignAuditPage() {
         } catch { /* skip invalid hex */ }
       }
     }
-    // Deduplicate by sorted pair key to avoid showing A-on-B and B-on-A as separate rows
-    // (keep the row where fg is "darker" on "lighter" bg for readability)
     const seen = new Set<string>()
     return pairs.filter((p) => {
       const key = [p.fgToken, p.bgToken].sort().join('||')
@@ -763,6 +785,42 @@ export function DesignAuditPage() {
   const failAACount  = allPairs.filter((p) => sizeTab === 'normal' ? !p.passAA  : !p.passAALg).length
   const failAAACount = allPairs.filter((p) => sizeTab === 'normal' ? !p.passAAA : !p.passAAALg).length
   const passAACount  = allPairs.filter((p) => sizeTab === 'normal' ?  p.passAA  :  p.passAALg).length
+
+  // Live ratio in the editor panel
+  const liveRatio = useMemo(() => {
+    if (!edit) return 0
+    const pair = allPairs.find((p) => `${p.fgToken}-${p.bgToken}` === edit.pairKey)
+    if (!pair) return 0
+    const fgHex = edit.target === 'fg' ? (normalizeHex(edit.draftHex) ?? edit.draftHex) : pair.fgHex
+    const bgHex = edit.target === 'bg' ? (normalizeHex(edit.draftHex) ?? edit.draftHex) : pair.bgHex
+    try { return wcagRatio(fgHex, bgHex) } catch { return 0 }
+  }, [edit, allPairs])
+
+  function openEdit(pair: AuditPair, target: EditTarget, level: 'AA' | 'AAA') {
+    const tokenIndex = target === 'fg' ? pair.fgIndex : pair.bgIndex
+    const tokenName  = target === 'fg' ? pair.fgToken : pair.bgToken
+    const originalHex = target === 'fg' ? pair.fgHex  : pair.bgHex
+    const otherHex   = target === 'fg' ? pair.bgHex   : pair.fgHex
+    const targetRatio = level === 'AA'
+      ? (sizeTab === 'normal' ? 4.5 : 3)
+      : (sizeTab === 'normal' ? 7   : 4.5)
+    const suggested = suggestCompliantHex(originalHex, otherHex, targetRatio)
+    setEdit({
+      pairKey: `${pair.fgToken}-${pair.bgToken}`,
+      target, tokenIndex, tokenName, originalHex,
+      draftHex: suggested,
+      targetLevel: level,
+    })
+  }
+
+  function applyEdit() {
+    if (!edit) return
+    const norm = normalizeHex(edit.draftHex)
+    if (!norm) { notify('Invalid hex color — use format #RRGGBB'); return }
+    updateColor(edit.tokenIndex, { value: norm })
+    notify(`${edit.tokenName} updated to ${norm} and saved`)
+    setEdit(null)
+  }
 
   function exportJson() {
     const data = allPairs.map((p) => ({
@@ -820,6 +878,14 @@ export function DesignAuditPage() {
     )
   }
 
+  // Find pair for the edit panel live preview
+  const editPair = edit ? allPairs.find((p) => `${p.fgToken}-${p.bgToken}` === edit.pairKey) ?? null : null
+  const liveAA   = liveRatio >= (sizeTab === 'normal' ? 4.5 : 3)
+  const liveAAA  = liveRatio >= (sizeTab === 'normal' ? 7   : 4.5)
+  const targetRatioNum = edit
+    ? (edit.targetLevel === 'AA' ? (sizeTab === 'normal' ? 4.5 : 3) : (sizeTab === 'normal' ? 7 : 4.5))
+    : 4.5
+
   return (
     <div className="page">
       <PageTitle
@@ -850,7 +916,6 @@ export function DesignAuditPage() {
 
       {/* Controls row */}
       <div className="audit-controls">
-        {/* Text size tab */}
         <div className="audit-size-tabs" role="tablist" aria-label="Text size">
           {(['normal', 'large'] as TextSize[]).map((s) => (
             <button key={s} role="tab" aria-selected={sizeTab === s}
@@ -861,7 +926,6 @@ export function DesignAuditPage() {
           ))}
         </div>
 
-        {/* Filter tabs */}
         <div className="audit-filter-tabs" role="tablist" aria-label="Filter">
           {([
             { id: 'all',      label: 'All' },
@@ -877,7 +941,6 @@ export function DesignAuditPage() {
           ))}
         </div>
 
-        {/* Export */}
         <div className="audit-export-group">
           <button className="button-secondary compact" onClick={exportJson}>
             <Download size={13} /> JSON
@@ -888,16 +951,111 @@ export function DesignAuditPage() {
         </div>
       </div>
 
-      {/* WCAG info banner */}
       <div className="info-banner">
         <span>
           <strong>WCAG {sizeTab === 'normal' ? 'Normal text' : 'Large text'} thresholds:</strong>
-          {sizeTab === 'normal'
-            ? ' AA ≥ 4.5:1 · AAA ≥ 7:1'
-            : ' AA ≥ 3:1 · AAA ≥ 4.5:1'}
-          . Large text is defined as ≥18 pt regular or ≥14 pt bold.
+          {sizeTab === 'normal' ? ' AA ≥ 4.5:1 · AAA ≥ 7:1' : ' AA ≥ 3:1 · AAA ≥ 4.5:1'}.
+          Click <strong>Fix AA</strong> or <strong>Fix AAA</strong> on any card to edit and save a compliant color.
         </span>
       </div>
+
+      {/* Inline color edit panel */}
+      {edit && editPair && (
+        <div className="audit-edit-panel">
+          <div className="audit-edit-header">
+            <span className="audit-edit-title">
+              <Pencil size={14} /> Edit <code>{edit.tokenName}</code> → target {edit.targetLevel}
+              {' '}({edit.targetLevel === 'AA'
+                ? (sizeTab === 'normal' ? '≥ 4.5:1' : '≥ 3:1')
+                : (sizeTab === 'normal' ? '≥ 7:1'   : '≥ 4.5:1')})
+            </span>
+            <button className="icon-button subtle" aria-label="Close editor" onClick={() => setEdit(null)}>
+              <X size={15} />
+            </button>
+          </div>
+
+          <div className="audit-edit-body">
+            {/* Live swatch */}
+            <div className="audit-edit-swatch" style={{
+              background: edit.target === 'bg'
+                ? (normalizeHex(edit.draftHex) ?? edit.draftHex)
+                : editPair.bgHex,
+            }}>
+              <span style={{
+                color: edit.target === 'fg'
+                  ? (normalizeHex(edit.draftHex) ?? edit.draftHex)
+                  : editPair.fgHex,
+              }}>Aa</span>
+              <div className="audit-edit-live-ratio">
+                <span className={`audit-badge ${liveAA ? 'pass' : 'fail'}`}>{liveAA ? '✓' : '✗'} AA</span>
+                <span className={`audit-badge ${liveAAA ? 'pass' : 'fail'}`}>{liveAAA ? '✓' : '✗'} AAA</span>
+                <strong>{ratioLabel(liveRatio)}</strong>
+              </div>
+            </div>
+
+            {/* Controls */}
+            <div className="audit-edit-controls">
+              <label className="audit-edit-label">
+                Token
+                <span className="audit-edit-token-name">{edit.tokenName}</span>
+              </label>
+
+              <label className="audit-edit-label">
+                Color picker
+                <div className="audit-edit-color-row">
+                  <input
+                    type="color"
+                    className="audit-color-picker"
+                    value={normalizeHex(edit.draftHex) ?? edit.draftHex}
+                    onChange={(e) => setEdit({ ...edit, draftHex: e.target.value })}
+                  />
+                  <input
+                    type="text"
+                    className="field-control compact-input audit-hex-input"
+                    value={edit.draftHex}
+                    maxLength={7}
+                    onChange={(e) => setEdit({ ...edit, draftHex: e.target.value })}
+                    placeholder="#RRGGBB"
+                  />
+                </div>
+              </label>
+
+              {/* Quick suggest buttons */}
+              <label className="audit-edit-label">Auto-suggest compliant shade</label>
+              <div className="audit-suggest-row">
+                <button className="button-secondary compact" onClick={() => {
+                  const otherHex = edit.target === 'fg' ? editPair.bgHex : editPair.fgHex
+                  setEdit({ ...edit, draftHex: suggestCompliantHex(edit.originalHex, otherHex, targetRatioNum) })
+                }}>
+                  <Sparkles size={12} /> Suggest {edit.targetLevel} shade
+                </button>
+                <button className="button-secondary compact" onClick={() => setEdit({ ...edit, draftHex: edit.originalHex })}>
+                  Reset
+                </button>
+              </div>
+
+              {liveRatio >= targetRatioNum ? (
+                <div className="audit-edit-ok">
+                  <CheckCircle2 size={14} /> Meets {edit.targetLevel} ({ratioLabel(liveRatio)})
+                </div>
+              ) : (
+                <div className="audit-edit-warn">
+                  <TriangleAlert size={14} /> Need {ratioLabel(targetRatioNum)}, current {ratioLabel(liveRatio)}
+                </div>
+              )}
+
+              <div className="audit-edit-actions">
+                <button className="button-primary" onClick={applyEdit}>
+                  <Check size={14} /> Apply & save
+                </button>
+                <button className="button-secondary" onClick={() => setEdit(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Results grid */}
       {filtered.length === 0 ? (
@@ -910,10 +1068,10 @@ export function DesignAuditPage() {
           {filtered.map((pair) => {
             const aa  = sizeTab === 'normal' ? pair.passAA   : pair.passAALg
             const aaa = sizeTab === 'normal' ? pair.passAAA  : pair.passAAALg
+            const isEditing = edit?.pairKey === `${pair.fgToken}-${pair.bgToken}`
             return (
               <article key={`${pair.fgToken}-${pair.bgToken}`}
-                className={`audit-pair-card ${!aa ? 'fail' : !aaa ? 'warn' : 'pass'}`}>
-                {/* Swatch preview */}
+                className={`audit-pair-card ${!aa ? 'fail' : !aaa ? 'warn' : 'pass'} ${isEditing ? 'editing' : ''}`}>
                 <div className="audit-swatch-pair" style={{ background: pair.bgHex }}>
                   <span className="audit-swatch-text" style={{ color: pair.fgHex }}>Aa</span>
                   <div className="audit-swatch-tokens">
@@ -922,7 +1080,6 @@ export function DesignAuditPage() {
                   </div>
                 </div>
 
-                {/* Info */}
                 <div className="audit-pair-info">
                   <div className="audit-token-names">
                     <span className="audit-token-label" title={pair.fgHex}>{pair.fgToken}</span>
@@ -932,26 +1089,36 @@ export function DesignAuditPage() {
 
                   <div className="audit-ratio-row">
                     <span className="audit-ratio">{ratioLabel(pair.ratio)}</span>
-                    <span className={`audit-badge ${aa ? 'pass' : 'fail'}`}>
-                      {aa ? '✓' : '✗'} AA
-                    </span>
-                    <span className={`audit-badge ${aaa ? 'pass' : 'fail'}`}>
-                      {aaa ? '✓' : '✗'} AAA
-                    </span>
+                    <span className={`audit-badge ${aa ? 'pass' : 'fail'}`}>{aa ? '✓' : '✗'} AA</span>
+                    <span className={`audit-badge ${aaa ? 'pass' : 'fail'}`}>{aaa ? '✓' : '✗'} AAA</span>
                   </div>
 
-                  {!aa && (
-                    <p className="audit-fix">
-                      <TriangleAlert size={12} />
-                      {fixSuggestion(pair)}
-                    </p>
-                  )}
-                  {aa && !aaa && (
-                    <p className="audit-fix subtle">
-                      <Info size={12} />
-                      Passes AA but not AAA. Need {sizeTab === 'normal' ? '7:1' : '4.5:1'} for AAA.
-                    </p>
-                  )}
+                  {/* Fix buttons */}
+                  <div className="audit-fix-actions">
+                    {!aa && (
+                      <>
+                        <button className="audit-fix-btn" onClick={() => openEdit(pair, 'fg', 'AA')}>
+                          <Pencil size={11} /> Fix fg → AA
+                        </button>
+                        <button className="audit-fix-btn" onClick={() => openEdit(pair, 'bg', 'AA')}>
+                          <Pencil size={11} /> Fix bg → AA
+                        </button>
+                      </>
+                    )}
+                    {aa && !aaa && (
+                      <>
+                        <button className="audit-fix-btn warn" onClick={() => openEdit(pair, 'fg', 'AAA')}>
+                          <Pencil size={11} /> Fix fg → AAA
+                        </button>
+                        <button className="audit-fix-btn warn" onClick={() => openEdit(pair, 'bg', 'AAA')}>
+                          <Pencil size={11} /> Fix bg → AAA
+                        </button>
+                      </>
+                    )}
+                    {aa && aaa && (
+                      <span className="audit-compliant-label"><CheckCircle2 size={12} /> Compliant</span>
+                    )}
+                  </div>
                 </div>
               </article>
             )

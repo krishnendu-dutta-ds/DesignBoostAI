@@ -189,7 +189,7 @@ export const useDesignStore = create<DesignState>()(
       addColor: (color) =>
         set((state) => ({
           projects: state.projects.map((project) =>
-            project.id === state.activeProjectId ? updated({ ...project, colors: [...project.colors, color] }) : project,
+            project.id === state.activeProjectId ? updated({ ...project, colors: [color, ...project.colors] }) : project,
           ),
         })),
       removeColor: (index) =>
