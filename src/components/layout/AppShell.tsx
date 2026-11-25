@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Accessibility, Bell, Blocks, BookOpen, ChevronDown, ChevronsLeft, ChevronsRight, CircleHelp,
-  Command, Download, FolderKanban, Gauge, LayoutDashboard, Menu, Palette,
+  Command, Download, FolderKanban, Gauge, LayoutDashboard, LogOut, Menu, Palette,
   Search, Settings, SlidersHorizontal, Sparkles, Type, X,
 } from 'lucide-react'
+import type { User } from 'firebase/auth'
 import { useDesignStore } from '../../store/useDesignStore'
 import { createFigmaVariablesDocument, createTokensStudioDocument, createWorkspaceBackup, downloadJson } from '../../utils/projectExport'
 
@@ -38,7 +39,15 @@ function projectSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'design-system'
 }
 
-export function AppShell() {
+type AppShellProps = {
+  user: User
+  syncStatus: 'loading' | 'syncing' | 'synced' | 'error'
+  syncError: string
+  onRetrySync: () => void
+  onSignOut: () => void
+}
+
+export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -51,6 +60,8 @@ export function AppShell() {
   const activeProjectId = useDesignStore((state) => state.activeProjectId)
   const setActiveProject = useDesignStore((state) => state.setActiveProject)
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
+  const profileName = user.displayName || user.email || 'Google user'
+  const profileInitial = profileName.charAt(0).toUpperCase()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const searchResults = useMemo(
@@ -116,8 +127,8 @@ export function AppShell() {
             {!collapsed ? <><div className="usage-head"><span>Workspace usage</span><span>68%</span></div><div className="usage-track"><i /></div><small>68 of 100 tokens used</small></> : <Gauge size={18} />}
           </div>
           <button className="profile-button" title="Open settings" onClick={() => navigate('/settings')}>
-            <span className="profile-avatar">D</span>
-            {!collapsed && <><span className="profile-copy"><strong>Designer</strong><small>Personal workspace</small></span><Settings size={15} /></>}
+            <span className="profile-avatar">{profileInitial}</span>
+            {!collapsed && <><span className="profile-copy"><strong>{profileName}</strong><small>{user.email ?? 'Google account'}</small></span><Settings size={15} /></>}
           </button>
         </div>
       </aside>
@@ -147,10 +158,18 @@ export function AppShell() {
                 <button disabled={!activeProject} onClick={exportFigmaVariables}>Figma Variables JSON <small>W3C DTCG · color, spacing, margin and typography</small></button>
               </div>
             </div>
-            <span className="header-avatar">D</span>
+            <span className={`firebase-sync-indicator ${syncStatus}`} role="status"><i />{syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'error' ? 'Sync error' : 'Firebase synced'}</span>
+            <span className="header-avatar" title={profileName}>{profileInitial}</span>
+            <button type="button" className="icon-button sign-out-button" aria-label="Sign out" title="Sign out" onClick={onSignOut}><LogOut size={16} /></button>
           </div>
         </header>
-        <main className="page-content"><Outlet /></main>
+        <main className="page-content">
+          {syncError && <div className="firebase-sync-error" role="alert">
+            <div><strong>Workspace sync issue</strong><span>{syncError}</span></div>
+            <button type="button" className="button-secondary compact" onClick={onRetrySync}>Retry sync</button>
+          </div>}
+          <Outlet />
+        </main>
       </div>
       {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
     </div>

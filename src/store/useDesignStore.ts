@@ -47,7 +47,7 @@ export const useDesignStore = create<DesignState>()(
       addProject: (name) =>
         set((state) => {
           const project: DesignProject = {
-            id: `project-${Date.now()}`,
+            id: `project-${crypto.randomUUID()}`,
             name,
             updatedAt: new Date().toISOString(),
             colors: [],
@@ -76,7 +76,7 @@ export const useDesignStore = create<DesignState>()(
           const defaults = createDefaultProjectSettings()
           const copy = updated({
             ...source,
-            id: `project-${Date.now()}`,
+            id: `project-${crypto.randomUUID()}`,
             name: `${source.name} copy`,
             colors: source.colors.map((color) => ({ ...color })),
             tokens: source.tokens.map((token) => ({ ...token })),
