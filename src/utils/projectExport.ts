@@ -9,6 +9,7 @@ import type {
   WorkspaceBackup,
 } from '../types'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
+import { createTypographyStyleTokens } from '../data/typographyScale'
 import { normalizeHex, rgbFromHex } from './color'
 
 export function createWorkspaceBackup(projects: DesignProject[], activeProjectId: string): WorkspaceBackup {
@@ -72,6 +73,9 @@ export function createTokensStudioDocument(project: DesignProject): TokensStudio
   insertToken(tokens, 'typography.line-height', `${Number((typography.lineHeight * 100).toFixed(2))}%`, 'lineHeights')
   insertToken(tokens, 'typography.letter-spacing', `${typography.letterSpacing}px`, 'letterSpacing')
   insertToken(tokens, 'typography.text-case', typography.textTransform, 'textCase')
+  for (const token of createTypographyStyleTokens(typography)) {
+    insertToken(tokens, token.name, token.type === 'fontWeights' ? Number(token.value) : token.value, token.type)
+  }
 
   const spacing = settings.spacing
   const spacingSteps = [1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24]
@@ -144,6 +148,11 @@ export function createFigmaVariablesDocument(project: DesignProject): FigmaVaria
     variables.color = { $type: 'color', ...colorVariables }
   }
   const settings = project.settings ?? createDefaultProjectSettings()
+  for (const token of createTypographyStyleTokens(settings.typography)) {
+    const number = parseFigmaNumber(token.value)
+    if (number !== null) insertFigmaVariable(variables, token.name, number, 'number')
+    else insertFigmaVariable(variables, token.name, token.value, 'string')
+  }
 
   for (const token of project.tokens) {
     if (token.group === 'Colors') continue

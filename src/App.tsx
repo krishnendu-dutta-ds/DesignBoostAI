@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { LoaderCircle, Sparkles } from 'lucide-react'
+import { Blocks, LoaderCircle } from 'lucide-react'
 import { AppShell } from './components/layout/AppShell'
 import { firebaseAuth, firebaseConfigured, signInWithGoogle, signOutFromFirebase } from './firebase/client'
 import { useFirebaseProjectSync } from './firebase/useFirebaseProjectSync'
@@ -37,9 +37,17 @@ function LoadingScreen({ message }: { message: string }) {
   return <main className="firebase-screen"><div className="firebase-card firebase-loading"><LoaderCircle className="firebase-spinner" size={24} /><p>{message}</p></div></main>
 }
 
+function AuthBrand() {
+  return <div className="auth-brand">
+    <span className="brand-mark"><Blocks size={16} /></span>
+    <span className="brand-name">designboost<span>ai</span></span>
+    <span className="auth-brand-context">WORKSPACE</span>
+  </div>
+}
+
 function SetupRequiredScreen() {
   return <main className="firebase-screen"><section className="firebase-card">
-    <span className="firebase-brand"><Sparkles size={18} /></span>
+    <AuthBrand />
     <h1>Firebase setup required</h1>
     <p>Add the Firebase web app settings to the deployment environment before signing in.</p>
     <code>VITE_FIREBASE_API_KEY<br />VITE_FIREBASE_AUTH_DOMAIN<br />VITE_FIREBASE_PROJECT_ID<br />VITE_FIREBASE_APP_ID</code>
@@ -48,17 +56,17 @@ function SetupRequiredScreen() {
 
 function SignInScreen({ error, onSignIn }: { error: string; onSignIn: () => void }) {
   return <main className="firebase-screen"><section className="firebase-card">
-    <span className="firebase-brand"><Sparkles size={18} /></span>
-    <h1>Welcome to DesignBoost AI</h1>
-    <p>Sign in with Google to securely access your Firebase workspace and projects.</p>
+    <AuthBrand />
+    <h1>Sign in to your workspace</h1>
+    <p>Keep the colors, type and spacing behind your products together.</p>
     {error && <div className="firebase-auth-error" role="alert">{error}</div>}
-    <button className="button-primary firebase-sign-in" onClick={onSignIn}>Continue with Google</button>
+    <button className="button-secondary firebase-sign-in" onClick={onSignIn}><span className="google-letter" aria-hidden="true">G</span>Continue with Google</button>
   </section></main>
 }
 
 function WorkspaceUnavailableScreen({ error, onRetry, onSignOut }: { error: string; onRetry: () => void; onSignOut: () => void }) {
   return <main className="firebase-screen"><section className="firebase-card">
-    <span className="firebase-brand"><Sparkles size={18} /></span>
+    <AuthBrand />
     <h1>Workspace unavailable</h1>
     <p>Your local workspace could not be safely matched to this Google account.</p>
     {error && <div className="firebase-auth-error" role="alert">{error}</div>}
@@ -78,7 +86,7 @@ function AuthenticatedWorkspace({ user, authError }: { user: User; authError: st
     })
   }
 
-  if (!ready) return <LoadingScreen message="Connecting to your Firebase workspace..." />
+  if (!ready) return <LoadingScreen message="Connecting to Design Boost AI" />
   if (!safeToRender) {
     return <WorkspaceUnavailableScreen
       error={error || signOutError || authError}

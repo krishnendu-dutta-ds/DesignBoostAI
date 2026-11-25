@@ -4,16 +4,20 @@ import { initialProjects } from '../data/seed'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
 import type { ColorToken, DesignProject, GradientSettings, ProjectSettingsPatch } from '../types'
 
+type ThemeMode = 'dark' | 'light'
+
 type DesignState = {
   projects: DesignProject[]
   activeProjectId: string
   sidebarCollapsed: boolean
   workspaceName: string
   compactDensity: boolean
+  theme: ThemeMode
   setActiveProject: (id: string) => void
   setSidebarCollapsed: (collapsed: boolean) => void
   setWorkspaceName: (name: string) => void
   setCompactDensity: (compact: boolean) => void
+  setTheme: (theme: ThemeMode) => void
   addProject: (name: string) => void
   renameProject: (id: string, name: string) => void
   deleteProject: (id: string) => void
@@ -38,12 +42,14 @@ export const useDesignStore = create<DesignState>()(
       projects: initialProjects,
       activeProjectId: '',
       sidebarCollapsed: false,
-      workspaceName: 'Design team',
+      workspaceName: 'My workspace',
       compactDensity: false,
+      theme: 'dark',
       setActiveProject: (id) => set({ activeProjectId: id }),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       setWorkspaceName: (name) => set({ workspaceName: name }),
       setCompactDensity: (compact) => set({ compactDensity: compact }),
+      setTheme: (theme) => set({ theme }),
       addProject: (name) =>
         set((state) => {
           const project: DesignProject = {

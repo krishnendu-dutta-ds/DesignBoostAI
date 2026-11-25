@@ -1,14 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowRight, ArrowUpRight, Check, ChevronDown, Copy, Download, Eye, FilePlus2,
-  LayoutGrid, MoreHorizontal, Plus, Search, Sparkles, Trash2, Upload, X,
+  ArrowRight, Check, ChevronDown, Copy, Download, Eye, FolderKanban,
+  LayoutGrid, Moon, MoreHorizontal, Palette, Plus, Search, Sparkles, Sun, Trash2, Type, Upload, X,
 } from 'lucide-react'
 import { useDesignStore } from '../store/useDesignStore'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
+import { createTypographyStyleTokens, TYPOGRAPHY_SCALE } from '../data/typographyScale'
 import { websitePalettes } from '../data/websitePalettes'
 import { contrastRatio, createGradientCss, createPaletteCss, hexFromHsl, hslFromHex, normalizeHex, rgbFromHex } from '../utils/color'
-import { isDesignProject, isWorkspaceBackup, normalizeProject } from '../utils/projectExport'
+import { getFontFamilyStack } from '../utils/fontFamily'
+import { createFigmaVariablesDocument, downloadJson, isDesignProject, isWorkspaceBackup, normalizeProject } from '../utils/projectExport'
 
 const GoogleFontPicker = lazy(() => import('../components/GoogleFontPicker').then((module) => ({ default: module.GoogleFontPicker })))
 
@@ -49,47 +51,47 @@ function downloadText(filename: string, value: string, type = 'application/json'
 
 export function DashboardPage() {
   const projects = useDesignStore((state) => state.projects)
-  const active = useDesignStore((state) => state.projects.find((project) => project.id === state.activeProjectId))
+  const recentProjects = [...projects].sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
+  const active = useDesignStore((state) => state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0])
   const setActive = useDesignStore((state) => state.setActiveProject)
   const { notice, notify } = useNotice()
   const stats = [
-    { label: 'Design systems', value: projects.length.toString(), change: 'In this workspace', icon: LayoutGrid, trend: 'up' },
-    { label: 'Color palettes', value: projects.reduce((total, project) => total + project.colors.length, 0).toString(), change: 'Across all projects', icon: Sparkles, trend: 'flat' },
-    { label: 'Design tokens', value: projects.reduce((total, project) => total + project.tokens.length, 0).toString(), change: 'Across all projects', icon: FilePlus2, trend: 'flat' },
+    { label: 'Design systems', value: projects.length.toString(), detail: 'In this workspace', icon: FolderKanban },
+    { label: 'Colors', value: projects.reduce((total, project) => total + project.colors.length, 0).toString(), detail: 'Across your systems', icon: Palette },
+    { label: 'Tokens', value: projects.reduce((total, project) => total + project.tokens.length, 0).toString(), detail: 'Across your systems', icon: LayoutGrid },
   ]
   const quickActions = [
-    { title: 'Create a design system', desc: 'Start with a fresh canvas', icon: Plus, to: '/projects', tone: 'violet' },
-    { title: 'Generate color palette', desc: 'Find your next color story', icon: Sparkles, to: '/colors', tone: 'orange' },
-    { title: 'Create type scale', desc: 'Build a clear hierarchy', icon: Eye, to: '/typography', tone: 'blue' },
+    { title: 'Add colors', desc: 'Build a palette for your system', icon: Palette, to: '/colors', tone: 'blue' },
+    { title: 'Set typography', desc: 'Choose a type scale', icon: Type, to: '/typography', tone: 'neutral' },
+    { title: 'Set spacing', desc: 'Define a consistent rhythm', icon: LayoutGrid, to: '/spacing', tone: 'neutral' },
   ]
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase()
   return <div className="page">
     <div className="welcome-row">
-      <div><div className="eyebrow">{today} <span className="live-dot" /> PERSONAL WORKSPACE</div><h1>Good morning, Designer <span className="wave">✦</span></h1><p>Build better interfaces with consistent design systems.</p></div>
+      <div><div className="eyebrow">WORKSPACE</div><h1>Your design workspace</h1><p>Keep the decisions behind your product in one place.</p></div>
       <Link to="/projects" className="button-primary"><Plus size={16} /> New design system</Link>
     </div>
-    <div className="stat-grid">{stats.map(({ label, value, change, icon: Icon, trend }) => <article className="stat-card" key={label}><div className="stat-top"><span>{label}</span><Icon size={17} /></div><div className="stat-value">{value}</div><div className={`stat-change ${trend}`}><ArrowUpRight size={13} />{change}</div></article>)}</div>
-    <div className="dashboard-grid">
-      <Panel title="Recent projects" description="Pick up where you left off." action={<Link className="text-link" to="/projects">View all <ArrowRight size={14} /></Link>} className="recent-panel">
-        <div className="project-list">{projects.length ? projects.slice(0, 3).map((project, index) => <button key={project.id} className={`project-row ${active?.id === project.id ? 'selected' : ''}`} onClick={() => { setActive(project.id); notify(`${project.name} selected`) }}>
-          <div className={`project-thumb thumb-${index % 3}`}><span className="thumb-orbit" /><span className="thumb-orbit small" /><i /></div>
-          <div className="project-details"><strong>{project.name}</strong><span>{project.tokens.length + 18} tokens <i /> Edited {index === 0 ? '2h' : `${index + 1}d`} ago</span></div>
-          <span className="project-status"><i /> In progress</span><MoreHorizontal size={17} className="muted" />
-        </button>) : <div className="search-empty">No projects yet. Create a design system to get started.</div>}</div>
-      </Panel>
-      <Panel title="Quick actions" description="Jump straight into your next task." className="quick-panel">
-        <div className="quick-actions">{quickActions.map(({ title, desc, icon: Icon, to, tone }) => <Link className="quick-action" to={to} key={title}><span className={`quick-icon ${tone}`}><Icon size={17} /></span><span><strong>{title}</strong><small>{desc}</small></span><ArrowRight size={15} /></Link>)}</div>
-      </Panel>
-    </div>
-    <div className="dashboard-grid lower-grid">
-      <Panel title="Design activity" description="Workspace token activity" action={<span className="select-small">All time</span>}>
-        <div className="chart-summary"><strong>{projects.reduce((total, project) => total + project.tokens.length, 0)} <span>tokens</span></strong></div>
-        <div className="search-empty">Create or edit a project to start tracking activity.</div>
-      </Panel>
-      <Panel title="System overview" description={active?.name ?? 'Your active design system'} action={<Link to="/colors" className="text-link">Open system <ArrowRight size={14} /></Link>}>
-        {active && <div className="overview-preview"><div className="overview-copy"><span className="preview-label">COLOR PALETTE</span><div className="palette-strip">{active.colors.slice(0, 7).map((color) => <span key={color.name} style={{ backgroundColor: color.value }} title={`${color.name} ${color.value}`} />)}</div><span className="preview-label">TYPEFACE</span><div className="type-preview"><strong>Aa</strong><span><b>Inter</b><small>Regular · Medium · Bold</small></span></div></div><div className="overview-card"><span className="mini-pill">BUTTON / PRIMARY</span><span className="preview-cta">Get started <ArrowRight size={13} /></span><small>Consistent by design.</small></div></div>}
-      </Panel>
-    </div>
+    {projects.length === 0 ? <section className="dashboard-empty-state panel">
+      <span className="empty-overline">YOUR FIRST DESIGN SYSTEM</span>
+      <h2>Start with the foundations.</h2>
+      <p>Bring your colors, typography and spacing together in one place.</p>
+      <Link to="/projects" className="button-primary"><Plus size={16} /> Create a design system</Link>
+    </section> : <>
+      <div className="stat-grid">{stats.map(({ label, value, detail, icon: Icon }) => <article className="stat-card" key={label}><div className="stat-top"><span>{label}</span><Icon size={17} /></div><div className="stat-value">{value}</div><div className="stat-change">{detail}</div></article>)}</div>
+      <div className="dashboard-grid">
+        <Panel title="Recent projects" description="Your latest design systems." action={<Link className="text-link" to="/projects">View all <ArrowRight size={14} /></Link>} className="recent-panel">
+          <div className="project-list">{recentProjects.slice(0, 3).map((project) => <button key={project.id} className={`project-row ${active?.id === project.id ? 'selected' : ''}`} onClick={() => { setActive(project.id); notify(`${project.name} selected`) }}>
+            <div className="project-thumb">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} />) : <LayoutGrid size={18} />}</div>
+            <div className="project-details"><strong>{project.name}</strong><span>{project.colors.length} colors <i /> {project.tokens.length} tokens</span></div>
+          </button>)}</div>
+        </Panel>
+        <Panel title="Keep building" description="Make the next decision for your system." className="quick-panel">
+          <div className="quick-actions">{quickActions.map(({ title, desc, icon: Icon, to, tone }) => <Link className="quick-action" to={to} key={title}><span className={`quick-icon ${tone}`}><Icon size={17} /></span><span><strong>{title}</strong><small>{desc}</small></span><ArrowRight size={15} /></Link>)}</div>
+        </Panel>
+      </div>
+      {active && <Panel title={active.name} description="A snapshot of your active system." action={<Link to="/colors" className="text-link">Open system <ArrowRight size={14} /></Link>}>
+        <div className="overview-preview"><div className="overview-copy"><span className="preview-label">COLORS</span><div className="palette-strip">{active.colors.slice(0, 7).map((color) => <span key={color.name} style={{ backgroundColor: color.value }} title={`${color.name} ${color.value}`} />)}</div><span className="preview-label">TYPEFACE</span><div className="type-preview"><strong>Aa</strong><span><b>{active.settings?.typography.fontFamily ?? 'No typeface set'}</b><small>{active.settings?.typography.fontWeight ?? 'Not set'}</small></span></div></div><div className="overview-card"><span className="mini-pill">{active.colors.length} colors</span><strong>{active.tokens.length} tokens</strong><small>Saved in this design system</small></div></div>
+      </Panel>}
+    </>}
     {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
   </div>
 }
@@ -144,7 +146,7 @@ export function ColorStudioPage() {
     <PageTitle eyebrow="DESIGN SYSTEM / FOUNDATION" title="Color studio" description="Build website palettes, reusable CSS gradients, and a consistent color language.">
       <button className="button-secondary" onClick={() => exportColors('css')}><Download size={15} /> Export CSS</button><button className="button-primary" onClick={addNewColor}><Plus size={16} /> Add color</button>
     </PageTitle>
-    <div className="palette-hero"><div><span className="preview-label">ACTIVE PALETTE</span><h2>{project?.name ?? 'Your design system'}</h2><p>{colors.length} colors · Updated just now</p></div><div className="hero-swatches">{colors.slice(0, 8).map((color) => <span key={color.name} style={{ background: color.value }} title={color.name} />)}</div></div>
+    <div className="palette-hero"><div><span className="preview-label">ACTIVE PALETTE</span><h2>{project?.name ?? 'Your design system'}</h2><p>{colors.length} colors · {project?.tokens.length ?? 0} tokens</p></div><div className="hero-swatches">{colors.slice(0, 8).map((color) => <span key={color.name} style={{ background: color.value }} title={color.name} />)}</div></div>
     <Panel title="Website color palettes" description="Apply a coordinated palette to this project's colors and color tokens.">
       <div className="website-palette-grid">{websitePalettes.map((palette) => <button type="button" className={`website-palette-card ${activePaletteName === palette.name ? 'active' : ''}`} key={palette.name} aria-pressed={activePaletteName === palette.name} onClick={() => { applyPalette(palette.colors); setMode('All colors'); setColorDrafts({}); setValueFormat('HEX'); notify(`${palette.name} palette applied`) }}>
         <span className="website-palette-swatches">{palette.colors.slice(0, 8).map((color) => <i key={color.name} style={{ background: color.value }} title={`${color.name}: ${color.value}`} />)}</span>
@@ -209,6 +211,7 @@ export function TypographyStudioPage() {
   const updateProjectSettings = useDesignStore((state) => state.updateProjectSettings)
   const typography = project?.settings?.typography ?? createDefaultProjectSettings().typography
   const { fontFamily: font, fontWeight: weight, fontSize: size, lineHeight, letterSpacing, mobile, textTransform: transform } = typography
+  const fontFamilyStack = getFontFamilyStack(font)
   const [availableWeights, setAvailableWeights] = useState([400, 500, 600, 700])
   const updateAvailableWeights = useCallback((weights?: number[]) => setAvailableWeights(weights?.length ? weights : [400, 500, 600, 700]), [])
   const weightOptions = availableWeights.includes(Number(weight)) ? availableWeights : [...availableWeights, Number(weight)].sort((a, b) => a - b)
@@ -220,21 +223,16 @@ export function TypographyStudioPage() {
   const setMobile = (mobileValue: boolean) => updateProjectSettings({ typography: { mobile: mobileValue } })
   const setTransform = (textTransform: 'none' | 'uppercase' | 'capitalize') => updateProjectSettings({ typography: { textTransform } })
   const { notice, notify } = useNotice()
-  const scale = [
-    ['Display', mobile ? 48 : 64, '600'], ['Heading 1', mobile ? 36 : 48, '600'], ['Heading 2', mobile ? 30 : 36, '600'],
-    ['Heading 3', mobile ? 24 : 28, '600'], ['Heading 4', 22, '500'], ['Heading 5', 18, '500'],
-    ['Body large', 18, '400'], ['Body', 16, '400'], ['Body small', 14, '400'], ['Caption', 12, '400'], ['Overline', 11, '600'],
-  ] as const
-  const tokens = scale.map(([name, px, fontWeight]) => ({ name: `type.${name.toLowerCase().replace(/\s+/g, '-')}`, value: `${px}px / ${fontWeight}` }))
+  const scale = TYPOGRAPHY_SCALE.map(({ label, desktopSize, mobileSize, weight }) => [label, mobile ? mobileSize : desktopSize, String(weight)] as const)
   return <div className="page">
     <PageTitle eyebrow="DESIGN SYSTEM / FOUNDATION" title="Typography studio" description="Give every word a role with a clear, flexible type system.">
-      <button className="button-secondary" onClick={() => { downloadText('typography-tokens.json', JSON.stringify(tokens, null, 2)); notify('Typography tokens exported') }}><Download size={15} /> Export tokens</button>
+      <button className="button-secondary" onClick={() => { downloadText('typography-tokens.json', JSON.stringify(createTypographyStyleTokens(typography), null, 2)); notify('Typography tokens exported') }}><Download size={15} /> Export tokens</button>
     </PageTitle>
     <div className="studio-layout">
-      <div className="studio-main"><Panel title="Type scale" description="A modular scale that works across screens." action={<div className="segmented"><button className={!mobile ? 'selected' : ''} onClick={() => setMobile(false)}>Desktop</button><button className={mobile ? 'selected' : ''} onClick={() => setMobile(true)}>Mobile</button></div>}><div className="type-hierarchy">{scale.map(([name, px, fontWeight]) => <div className="type-line" key={name}><span className="type-label">{name}<small>{px}px / {fontWeight}</small></span><div style={{ fontSize: `${mobile ? Math.min(px, 48) : px}px`, fontWeight: fontWeight as React.CSSProperties['fontWeight'], fontFamily: font, letterSpacing: `${letterSpacing}px`, textTransform: transform }}>{name === 'Overline' ? 'DESIGN WITH INTENTION' : name === 'Display' ? 'Make it matter.' : 'The quick brown fox jumps.'}</div></div>)}</div></Panel>
+      <div className="studio-main"><Panel title="Type scale" description="A modular scale that works across screens." action={<div className="segmented"><button className={!mobile ? 'selected' : ''} onClick={() => setMobile(false)}>Desktop</button><button className={mobile ? 'selected' : ''} onClick={() => setMobile(true)}>Mobile</button></div>}><div className="type-hierarchy">{scale.map(([name, px, fontWeight]) => <div className="type-line" key={name}><span className="type-label">{name}<small>{px}px / {fontWeight}</small></span><div style={{ fontSize: `${mobile ? Math.min(px, 48) : px}px`, fontWeight: fontWeight as React.CSSProperties['fontWeight'], fontFamily: fontFamilyStack, letterSpacing: `${letterSpacing}px`, textTransform: transform }}>{name === 'Overline' ? 'DESIGN WITH INTENTION' : name === 'Display' ? 'Make it matter.' : 'The quick brown fox jumps.'}</div></div>)}</div></Panel>
         <Suspense fallback={<div className="panel google-font-loading">Loading Google Fonts library…</div>}><GoogleFontPicker projectName={project?.name ?? 'Your design system'} selectedFamily={font} selectedWeight={weight} onSelect={(selected, selectedWeight) => updateProjectSettings({ typography: { fontFamily: selected.family, fontWeight: selectedWeight } })} onWeightsChange={updateAvailableWeights} notify={notify} /></Suspense>
         <Panel title="Font pairing" description="A few thoughtfully paired starting points."><div className="pairing-grid">{[['Inter', 'DM Sans', 'Modern & neutral'], ['Manrope', 'Source Serif 4', 'Warm & editorial'], ['Space Grotesk', 'Inter', 'Technical & distinct']].map(([heading, body, mood]) => <button className="pairing-card" key={heading} onClick={() => { setFont(heading); notify(`${heading} + ${body} selected`) }}><div style={{ fontFamily: heading }}><strong>{heading}</strong><span style={{ fontFamily: body }}>Aa</span></div><small>{heading} <i>+</i> {body}</small><small className="pairing-mood">{mood}</small></button>)}</div></Panel></div>
-      <aside className="studio-side"><Panel title="Text settings" description="Tune your live preview."><label className="field-label">Font family</label><input className="field-control" aria-label="Selected font family" value={font} readOnly /><small className="font-selection-hint">Choose from the Google Fonts library.</small><label className="field-label">Font weight</label><select className="field-control" value={weight} onChange={(event) => setWeight(event.target.value)}>{weightOptions.map((value) => <option value={value} key={value}>{value} · {({ 100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: 'Regular', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black' } as Record<number, string>)[value] ?? 'Custom'}</option>)}</select><label className="field-label range-label">Font size <b>{size}px</b></label><input className="range-control" type="range" min="12" max="48" value={size} onChange={(event) => setSize(Number(event.target.value))} /><label className="field-label range-label">Line height <b>{lineHeight.toFixed(1)}</b></label><input className="range-control" type="range" min="1" max="2" step="0.1" value={lineHeight} onChange={(event) => setLineHeight(Number(event.target.value))} /><label className="field-label range-label">Letter spacing <b>{letterSpacing.toFixed(1)}px</b></label><input className="range-control" type="range" min="-2" max="4" step="0.1" value={letterSpacing} onChange={(event) => setLetterSpacing(Number(event.target.value))} /><div className="text-transform-row">{(['none', 'uppercase', 'capitalize'] as const).map((value) => <button className={transform === value ? 'selected' : ''} key={value} onClick={() => setTransform(value)}>{value === 'none' ? 'None' : value}</button>)}</div><div className="live-type-preview"><span className="preview-label">LIVE PREVIEW</span><p style={{ fontFamily: font, fontSize: `${size}px`, fontWeight: Number(weight), lineHeight, letterSpacing: `${letterSpacing}px`, textTransform: transform }}>{'Design systems help teams move faster without losing the details that make a product feel human.'}</p><small>{font} · {weight} · {size}px / {lineHeight.toFixed(1)}</small></div></Panel></aside>
+      <aside className="studio-side"><Panel title="Text settings" description="Tune your live preview."><label className="field-label">Font family</label><input className="field-control" aria-label="Selected font family" value={font} readOnly /><small className="font-selection-hint">Choose from the Google Fonts library.</small><label className="field-label">Font weight</label><select className="field-control" value={weight} onChange={(event) => setWeight(event.target.value)}>{weightOptions.map((value) => <option value={value} key={value}>{value} · {({ 100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: 'Regular', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black' } as Record<number, string>)[value] ?? 'Custom'}</option>)}</select><label className="field-label range-label">Font size <b>{size}px</b></label><input className="range-control" type="range" min="12" max="48" value={size} onChange={(event) => setSize(Number(event.target.value))} /><label className="field-label range-label">Line height <b>{lineHeight.toFixed(1)}</b></label><input className="range-control" type="range" min="1" max="2" step="0.1" value={lineHeight} onChange={(event) => setLineHeight(Number(event.target.value))} /><label className="field-label range-label">Letter spacing <b>{letterSpacing.toFixed(1)}px</b></label><input className="range-control" type="range" min="-2" max="4" step="0.1" value={letterSpacing} onChange={(event) => setLetterSpacing(Number(event.target.value))} /><div className="text-transform-row">{(['none', 'uppercase', 'capitalize'] as const).map((value) => <button className={transform === value ? 'selected' : ''} key={value} onClick={() => setTransform(value)}>{value === 'none' ? 'None' : value}</button>)}</div><div className="live-type-preview"><span className="preview-label">LIVE PREVIEW</span><p style={{ fontFamily: fontFamilyStack, fontSize: `${size}px`, fontWeight: Number(weight), lineHeight, letterSpacing: `${letterSpacing}px`, textTransform: transform }}>{'Design systems help teams move faster without losing the details that make a product feel human.'}</p><small>{font} · {weight} · {size}px / {lineHeight.toFixed(1)}</small></div></Panel></aside>
     </div>{notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
   </div>
 }
@@ -327,8 +325,10 @@ export function AccessibilityPage() {
 }
 
 const tokenGroups = ['All tokens', 'Colors', 'Typography', 'Spacing', 'Radius']
+type LibraryToken = { name: string; value: string; group: string; source: 'library' | 'studio' }
+
 export function TokensPage() {
-  const project = useDesignStore((state) => state.projects.find((item) => item.id === state.activeProjectId))
+  const project = useDesignStore((state) => state.projects.find((item) => item.id === state.activeProjectId) ?? state.projects[0])
   const addToken = useDesignStore((state) => state.addToken)
   const removeToken = useDesignStore((state) => state.removeToken)
   const updateToken = useDesignStore((state) => state.updateToken)
@@ -338,23 +338,79 @@ export function TokensPage() {
   const [value, setValue] = useState('')
   const [tokenGroup, setTokenGroup] = useState('Colors')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [previewFontStatus, setPreviewFontStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const { notice, notify } = useNotice()
   const tokens = project?.tokens ?? []
-  const visible = tokens.filter((token) => (group === 'All tokens' || token.group === group) && `${token.name} ${token.value}`.toLowerCase().includes(query.toLowerCase()))
+  const colors = project?.colors ?? []
+  const settings = project?.settings ?? createDefaultProjectSettings()
+  const { typography, spacing } = settings
+  const previewFontFamily = getFontFamilyStack(typography.fontFamily)
+  useEffect(() => {
+    let active = true
+    setPreviewFontStatus('loading')
+    void import('../utils/googleFonts').then(async ({ GOOGLE_FONTS, ensureGoogleFontLoaded }) => {
+      const selectedFont = GOOGLE_FONTS.find((font) => font.family === typography.fontFamily)
+      if (selectedFont) await ensureGoogleFontLoaded(selectedFont)
+      if (active) setPreviewFontStatus('ready')
+    })
+      .catch(() => { if (active) setPreviewFontStatus('error') })
+    return () => { active = false }
+  }, [typography.fontFamily])
+  const spacingSteps = [1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24].map((step) => step * spacing.baseUnit)
+  const syncedColorNames = new Set(colors.map((color) => `color.${color.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`))
+  const studioTokens: LibraryToken[] = [
+    ...colors.map((color) => ({
+      name: `color.${(color.category.trim() || 'Brand').replace(/[^a-zA-Z0-9_-]/g, '-')}.${color.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+      value: color.value,
+      group: 'Colors',
+      source: 'studio' as const,
+    })),
+    { name: 'typography.font-family', value: typography.fontFamily, group: 'Typography', source: 'studio' },
+    { name: 'typography.font-weight', value: typography.fontWeight, group: 'Typography', source: 'studio' },
+    { name: 'typography.font-size', value: `${typography.fontSize}px`, group: 'Typography', source: 'studio' },
+    { name: 'typography.line-height', value: `${Number((typography.lineHeight * 100).toFixed(2))}%`, group: 'Typography', source: 'studio' },
+    { name: 'typography.letter-spacing', value: `${typography.letterSpacing}px`, group: 'Typography', source: 'studio' },
+    { name: 'typography.text-case', value: typography.textTransform, group: 'Typography', source: 'studio' },
+    ...createTypographyStyleTokens(typography).map((token) => ({ name: token.name, value: token.value, group: 'Typography', source: 'studio' as const })),
+    { name: 'spacing.base-unit', value: `${spacing.baseUnit}px`, group: 'Spacing', source: 'studio' },
+    ...spacingSteps.map((step, index) => ({ name: `spacing.scale.${index + 1}`, value: `${step}px`, group: 'Spacing', source: 'studio' as const })),
+    { name: 'layout.container-width', value: `${spacing.containerWidth}px`, group: 'Spacing', source: 'studio' },
+    { name: 'layout.columns', value: String(spacing.columns), group: 'Spacing', source: 'studio' },
+    { name: 'layout.gutter', value: `${spacing.gutter}px`, group: 'Spacing', source: 'studio' },
+    { name: 'component.button.padding-horizontal', value: `${settings.component.size === 'Small' ? 13 : settings.component.size === 'Large' ? 22 : 17}px`, group: 'Spacing', source: 'studio' },
+    { name: 'component.button.padding-vertical', value: `${settings.component.size === 'Small' ? 8 : settings.component.size === 'Large' ? 14 : 11}px`, group: 'Spacing', source: 'studio' },
+    { name: 'radius.default', value: `${spacing.borderRadius}px`, group: 'Radius', source: 'studio' },
+    { name: 'component.button.radius', value: `${settings.component.radius}px`, group: 'Radius', source: 'studio' },
+  ]
+  const libraryTokensByName = new Map<string, LibraryToken>()
+  tokens
+    .filter((token) => token.group !== 'Colors' || !syncedColorNames.has(token.name))
+    .forEach((token) => libraryTokensByName.set(token.name, { ...token, source: 'library' }))
+  studioTokens.forEach((token) => libraryTokensByName.set(token.name, token))
+  const libraryTokens = [...libraryTokensByName.values()]
+  const groupCount = new Set(libraryTokens.map((token) => token.group)).size
+  const visible = libraryTokens.filter((token) => (group === 'All tokens' || token.group === group) && `${token.name} ${token.value}`.toLowerCase().includes(query.toLowerCase()))
+  const exportFigmaVariables = () => {
+    if (!project) return
+    const slug = project.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'design-system'
+    downloadJson(`${slug}-figma-variables.json`, createFigmaVariablesDocument(project))
+    notify('Figma Variables JSON exported from the reviewed studio settings')
+  }
   const exportTokens = (format: string) => {
+    const exportableTokens = libraryTokens.map(({ name: tokenName, value: tokenValue, group: tokenGroupName }) => ({ name: tokenName, value: tokenValue, group: tokenGroupName }))
     let result = ''
     let type = 'text/plain'
-    if (format === 'JSON') { result = JSON.stringify(tokens, null, 2); type = 'application/json' }
-    if (format === 'CSS') result = `:root {\n${tokens.map((token) => `  --${token.name.replace(/\./g, '-')}: ${token.value};`).join('\n')}\n}`
-    if (format === 'SCSS') result = tokens.map((token) => `$${token.name.replace(/\./g, '-')}: ${token.value};`).join('\n')
-    if (format === 'Tailwind') { result = `export default {\n  theme: {\n    extend: {\n      colors: {\n${tokens.filter((token) => token.group === 'Colors').map((token) => `        '${token.name.split('.').pop()}': '${token.value}',`).join('\n')}\n      },\n    },\n  },\n}`; type = 'text/javascript' }
+    if (format === 'JSON') { result = JSON.stringify(exportableTokens, null, 2); type = 'application/json' }
+    if (format === 'CSS') result = `:root {\n${exportableTokens.map((token) => `  --${token.name.replace(/\./g, '-')}: ${token.value};`).join('\n')}\n}`
+    if (format === 'SCSS') result = exportableTokens.map((token) => `$${token.name.replace(/\./g, '-')}: ${token.value};`).join('\n')
+    if (format === 'Tailwind') { result = `export default {\n  theme: {\n    extend: {\n      colors: {\n${exportableTokens.filter((token) => token.group === 'Colors').map((token) => `        '${token.name.split('.').pop()}': '${token.value}',`).join('\n')}\n      },\n    },\n  },\n}`; type = 'text/javascript' }
     downloadText(`design-tokens.${format === 'JSON' ? 'json' : format === 'SCSS' ? 'scss' : format === 'Tailwind' ? 'js' : 'css'}`, result, type)
     notify(`${format} tokens exported`)
   }
   const createToken = (event: React.FormEvent) => {
     event.preventDefault()
     if (!name.trim() || !value.trim()) return
-    if (tokens.some((token) => token.name === name.trim())) {
+    if (libraryTokens.some((token) => token.name === name.trim())) {
       notify('A token with this name already exists')
       return
     }
@@ -363,15 +419,24 @@ export function TokensPage() {
     setValue('')
     notify('Token added to your system')
   }
-  return <div className="page"><PageTitle eyebrow="DESIGN SYSTEM / TOKENS" title="Design tokens" description="One source of truth for the foundations behind your interface."><div className={`dropdown-wrap ${exportMenuOpen ? 'menu-open' : ''}`}><button type="button" className="button-secondary" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen((open) => !open)}><Download size={15} /> Export <ChevronDown size={13} /></button><div className="export-menu">{['CSS', 'JSON', 'SCSS', 'Tailwind'].map((format) => <button type="button" key={format} onClick={() => { exportTokens(format); setExportMenuOpen(false) }}>{format} format</button>)}</div></div></PageTitle>
-    <div className="token-summary"><div><span className="preview-label">ACTIVE SYSTEM</span><strong>{project?.name}</strong></div><div><span className="preview-label">TOTAL TOKENS</span><strong>{tokens.length}</strong></div><div><span className="preview-label">GROUPS</span><strong>4 <small>foundation</small></strong></div><div className="token-sync"><span /> All changes saved</div></div>
-    <Panel title="Token library" description="Search, filter, and manage every design decision."><div className="token-toolbar"><div className="tabs">{tokenGroups.map((item) => <button type="button" className={group === item ? 'tab-active' : ''} key={item} onClick={() => setGroup(item)}>{item}</button>)}</div><label className="token-search"><Search size={14} /><input placeholder="Search tokens..." value={query} onChange={(event) => setQuery(event.target.value)} /></label></div><div className="token-table-wrap"><table className="token-table"><thead><tr><th>Token name</th><th>Value</th><th>Group</th><th>Preview</th><th /></tr></thead><tbody>{visible.map((token) => <tr key={token.name}><td><input aria-label={`Edit token name ${token.name}`} className="token-edit token-name-edit" defaultValue={token.name} onBlur={(event) => { const next = event.target.value.trim(); if (next && (next === token.name || !tokens.some((item) => item.name === next))) updateToken(token.name, { name: next }); else event.target.value = token.name }} /></td><td><div className="token-value-wrap"><input aria-label={`Edit value for ${token.name}`} className="token-edit" value={token.value} onChange={(event) => updateToken(token.name, { value: event.target.value })} /><button type="button" className="copy-token" aria-label={`Copy ${token.value}`} onClick={() => void copyText(token.value, token.value, notify)}><Copy size={12} /></button></div></td><td><span className="token-group">{token.group}</span></td><td>{token.group === 'Colors' ? <span className="token-color" style={{ backgroundColor: token.value }} /> : <span className="token-preview-text" style={{ fontSize: token.group === 'Typography' ? 15 : undefined, marginLeft: token.group === 'Spacing' ? '12px' : undefined }}>{token.value}</span>}</td><td><button type="button" className="icon-button subtle danger-hover" title="Delete token" onClick={() => removeToken(token.name)}><Trash2 size={14} /></button></td></tr>)}</tbody></table>{visible.length === 0 && <div className="empty-state">No tokens match your search.</div>}</div></Panel>
+  return <div className="page"><PageTitle eyebrow="DESIGN SYSTEM / TOKENS" title="Design tokens" description="Review studio values and token variables in one place before exporting."><div className={`dropdown-wrap ${exportMenuOpen ? 'menu-open' : ''}`}><button type="button" className="button-secondary" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen((open) => !open)}><Download size={15} /> Export tokens <ChevronDown size={13} /></button><div className="export-menu">{['CSS', 'JSON', 'SCSS', 'Tailwind'].map((format) => <button type="button" key={format} onClick={() => { exportTokens(format); setExportMenuOpen(false) }}>{format} format</button>)}</div></div></PageTitle>
+    <Panel title="Studio values" description="Live values from Color Studio, Typography, and Spacing. Check this preview before exporting Figma variables." className="token-review-panel">
+      <div className="token-review-grid">
+        <section className="token-review-card"><h3>Colors <span>{colors.length}</span></h3>{colors.length ? <div className="token-review-color-list">{colors.map((color, index) => <div className="token-review-color" key={`${color.name}-${color.value}-${index}`}><i style={{ backgroundColor: color.value }} /><span>{color.name}</span><code>{color.value}</code></div>)}</div> : <p className="token-review-empty">No colors set in Color Studio yet.</p>}</section>
+        <section className="token-review-card"><h3>Typography</h3><div className="token-review-type" style={{ fontFamily: previewFontFamily, fontSize: `${typography.fontSize}px`, fontWeight: Number(typography.fontWeight), lineHeight: typography.lineHeight, letterSpacing: `${typography.letterSpacing}px`, textTransform: typography.textTransform }}>Aa — Design with intention.</div>{previewFontStatus === 'error' && <p className="token-review-empty" role="status">Could not load {typography.fontFamily}; showing its fallback.</p>}<div className="token-review-meta"><span>Family<strong>{typography.fontFamily}</strong></span><span>Weight<strong>{typography.fontWeight}</strong></span><span>Size<strong>{typography.fontSize}px</strong></span><span>Line height<strong>{typography.lineHeight}</strong></span><span>Letter spacing<strong>{typography.letterSpacing}px</strong></span><span>Case<strong>{typography.textTransform}</strong></span></div></section>
+        <section className="token-review-card"><h3>Spacing <span>{spacingSteps.length} steps</span></h3><div className="token-review-spacing">{spacingSteps.map((value, index) => <div className="token-review-space-row" key={`${value}-${index}`}><small>{`space.${index + 1}`}</small><span><i style={{ width: `${Math.min(value * 2, 120)}px` }} /></span><code>{value}px</code></div>)}</div><div className="token-review-meta"><span>Container<strong>{spacing.containerWidth}px</strong></span><span>Columns<strong>{spacing.columns}</strong></span><span>Gutter<strong>{spacing.gutter}px</strong></span><span>Radius<strong>{spacing.borderRadius}px</strong></span></div></section>
+      </div>
+      <div className="token-review-export"><span>Export uses the current project colors and studio settings shown above.</span><button type="button" className="button-primary" disabled={!project} onClick={exportFigmaVariables}><Download size={15} /> Export Figma Variables JSON</button></div>
+    </Panel>
+    <div className="token-summary"><div><span className="preview-label">ACTIVE SYSTEM</span><strong>{project?.name}</strong></div><div><span className="preview-label">TOTAL TOKENS</span><strong>{libraryTokens.length}</strong></div><div><span className="preview-label">GROUPS</span><strong>{groupCount} <small>in use</small></strong></div><div className="token-sync"><span /> All changes saved</div></div>
+    <Panel title="Token library" description="Search, filter, and manage every design decision."><div className="token-toolbar"><div className="tabs">{tokenGroups.map((item) => <button type="button" className={group === item ? 'tab-active' : ''} key={item} onClick={() => setGroup(item)}>{item}</button>)}</div><label className="token-search"><Search size={14} /><input placeholder="Search tokens..." value={query} onChange={(event) => setQuery(event.target.value)} /></label></div><div className="token-table-wrap"><table className="token-table"><thead><tr><th>Token name</th><th>Value</th><th>Group</th><th>Preview</th><th /></tr></thead><tbody>{visible.map((token) => <tr key={token.name}><td>{token.source === 'studio' ? <div className="token-library-name"><input aria-label={`Studio variable ${token.name}`} className="token-edit token-name-edit token-studio-name" value={token.name} readOnly /><span className="token-source-label">Studio</span></div> : <input aria-label={`Edit token name ${token.name}`} className="token-edit token-name-edit" defaultValue={token.name} onBlur={(event) => { const next = event.target.value.trim(); if (next && (next === token.name || !libraryTokens.some((item) => item.name === next))) updateToken(token.name, { name: next }); else event.target.value = token.name }} />}</td><td><div className="token-value-wrap">{token.source === 'studio' ? <input aria-label={`Studio value for ${token.name}`} className="token-edit" value={token.value} readOnly /> : <input aria-label={`Edit value for ${token.name}`} className="token-edit" value={token.value} onChange={(event) => updateToken(token.name, { value: event.target.value })} />}<button type="button" className="copy-token" aria-label={`Copy ${token.value}`} onClick={() => void copyText(token.value, token.value, notify)}><Copy size={12} /></button></div></td><td><span className="token-group">{token.group}</span></td><td>{token.group === 'Colors' ? <span className="token-color" style={{ backgroundColor: token.value }} /> : <span className="token-preview-text" style={{ fontSize: token.group === 'Typography' ? 15 : undefined, marginLeft: token.group === 'Spacing' ? '12px' : undefined }}>{token.value}</span>}</td><td>{token.source === 'library' && <button type="button" className="icon-button subtle danger-hover" title="Delete token" onClick={() => removeToken(token.name)}><Trash2 size={14} /></button>}</td></tr>)}</tbody></table>{visible.length === 0 && <div className="empty-state">No tokens match your search.</div>}</div></Panel>
     <Panel title="Create token" description="Add a new foundation token to your active system." className="add-token-panel"><form className="create-token-form" onSubmit={createToken}><div><label className="field-label" htmlFor="token-name">Token name</label><input id="token-name" className="field-control" placeholder="e.g. color.brand" value={name} onChange={(event) => setName(event.target.value)} required /></div><div><label className="field-label" htmlFor="token-value">Value</label><input id="token-value" className="field-control" placeholder="e.g. #7C6CFA or 16px" value={value} onChange={(event) => setValue(event.target.value)} required /></div><div><label className="field-label" htmlFor="token-group">Group</label><select id="token-group" className="field-control" value={tokenGroup} onChange={(event) => setTokenGroup(event.target.value)}>{tokenGroups.slice(1).map((item) => <option key={item}>{item}</option>)}</select></div><button className="button-primary" type="submit"><Plus size={15} /> Add token</button></form></Panel>
     {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}</div>
 }
 
 export function ProjectsPage() {
   const projects = useDesignStore((state) => state.projects)
+  const sortedProjects = [...projects].sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
   const activeProjectId = useDesignStore((state) => state.activeProjectId)
   const addProject = useDesignStore((state) => state.addProject)
   const renameProject = useDesignStore((state) => state.renameProject)
@@ -428,7 +493,7 @@ export function ProjectsPage() {
   return <div className="page"><PageTitle eyebrow="WORKSPACE / PROJECTS" title="Your projects" description="Manage design systems for every product and team."><label className="button-secondary file-button"><Upload size={15} /> Restore / import JSON<input type="file" accept="application/json,.json" onChange={(event) => { importFile(event.target.files?.[0]); event.currentTarget.value = '' }} /></label></PageTitle>
     <form className="create-project-bar" onSubmit={createProject}><span className="new-project-icon"><Plus size={18} /></span><div><strong>Start a new design system</strong><small>Set up a shared foundation for your next product.</small></div><input ref={inputRef} className="field-control" placeholder="Name your project..." value={name} onChange={(event) => setName(event.target.value)} required /><button className="button-primary" type="submit"><Plus size={15} /> Create</button></form>
     <div className="projects-heading"><div><h2>All projects <span>{projects.length}</span></h2><p>Saved to your Firebase account</p></div><span className="select-small">Sorted by last modified</span></div>
-    <div className="projects-grid">{projects.map((project, index) => <article className={`project-card ${activeProjectId === project.id ? 'current' : ''}`} key={project.id}><div className={`project-card-art thumb-${index % 3}`}><span className="thumb-orbit" /><span className="thumb-orbit small" /><div className="art-preview"><i /><i /><i /></div><button className="icon-button art-menu" title="More project actions" onClick={(event) => event.currentTarget.parentElement?.classList.toggle('menu-open')}><MoreHorizontal size={17} /></button><div className="project-menu"><button onClick={() => { const next = window.prompt('Rename design system', project.name); if (next?.trim()) { renameProject(project.id, next.trim()); notify('Project renamed; syncing to Firebase') } }}>Rename</button><button onClick={() => { duplicateProject(project.id); notify('Project duplicated; syncing to Firebase') }}>Duplicate</button><button className="danger-text" onClick={() => { if (window.confirm(`Delete “${project.name}”? This cannot be undone.`)) { deleteProject(project.id); notify('Project deleted; syncing to Firebase') } }}>Delete</button></div></div><div className="project-card-body"><div className="project-card-title"><h3>{project.name}</h3>{activeProjectId === project.id && <span className="active-badge">Active</span>}</div><p>{project.colors.length} colors <i /> {project.tokens.length + 18} tokens <i /> Edited {new Date(project.updatedAt).toLocaleDateString()}</p><div className="project-card-bottom"><div className="mini-palette">{project.colors.slice(0, 6).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><button className="button-secondary compact" onClick={() => { setActiveProject(project.id); notify(`${project.name} is now active`) }}>Open project <ArrowRight size={13} /></button></div></div></article>)}</div>
+    <div className="projects-grid">{sortedProjects.map((project) => <article className={`project-card ${activeProjectId === project.id ? 'current' : ''}`} key={project.id}><div className="project-card-art"><div className="project-art-swatches">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} title={color.name} />) : <span>No colors added yet</span>}</div><button className="icon-button art-menu" title="More project actions" onClick={(event) => event.currentTarget.parentElement?.classList.toggle('menu-open')}><MoreHorizontal size={17} /></button><div className="project-menu"><button onClick={() => { const next = window.prompt('Rename design system', project.name); if (next?.trim()) { renameProject(project.id, next.trim()); notify('Project renamed; syncing to Firebase') } }}>Rename</button><button onClick={() => { duplicateProject(project.id); notify('Project duplicated; syncing to Firebase') }}>Duplicate</button><button className="danger-text" onClick={() => { if (window.confirm(`Delete “${project.name}”? This cannot be undone.`)) { deleteProject(project.id); notify('Project deleted; syncing to Firebase') } }}>Delete</button></div></div><div className="project-card-body"><div className="project-card-title"><h3>{project.name}</h3>{activeProjectId === project.id && <span className="active-badge">Active</span>}</div><p>{project.colors.length} colors <i /> {project.tokens.length} tokens <i /> Edited {new Date(project.updatedAt).toLocaleDateString()}</p><div className="project-card-bottom"><div className="mini-palette">{project.colors.slice(0, 6).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div><button className="button-secondary compact" onClick={() => { setActiveProject(project.id); notify(`${project.name} is now active`) }}>Open project <ArrowRight size={13} /></button></div></div></article>)}</div>
     {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}</div>
 }
 
@@ -446,6 +511,8 @@ export function SettingsPage() {
   const setWorkspaceName = useDesignStore((state) => state.setWorkspaceName)
   const compact = useDesignStore((state) => state.compactDensity)
   const setCompact = useDesignStore((state) => state.setCompactDensity)
+  const theme = useDesignStore((state) => state.theme)
+  const setTheme = useDesignStore((state) => state.setTheme)
   const { notice, notify } = useNotice()
   useEffect(() => {
     document.documentElement.classList.toggle('compact-density', compact)
@@ -460,5 +527,50 @@ export function SettingsPage() {
     setWorkspaceName(nextName.trim())
     notify('Workspace name saved')
   }
-  return <div className="page"><PageTitle eyebrow="WORKSPACE / PREFERENCES" title="Settings" description="Make your workspace feel like yours." /><div className="settings-page-grid"><div className="settings-main"><Panel title="Workspace profile" description="The basics of your DesignBoost workspace."><div className="settings-profile"><span className="settings-avatar">D</span><div><strong>{workspaceName}</strong><small>Personal workspace · {projects.length} projects</small></div><button type="button" className="button-secondary" onClick={editWorkspaceName}>Edit profile</button></div><div className="settings-row"><div><b>Active design system</b><small>Default project for new design work.</small></div><select className="field-control" value={active?.id ?? ''} disabled={!projects.length} onChange={(event) => useDesignStore.getState().setActiveProject(event.target.value)}>{projects.length ? projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>) : <option value="">No projects yet</option>}</select></div></Panel><Panel title="Preferences" description="Configure how DesignBoost behaves."><div className="settings-row"><div><b>Compact density</b><small>Reduce spacing across panels and tables.</small></div><button type="button" className={`toggle-switch ${compact ? 'on' : ''}`} aria-label="Toggle compact density" aria-pressed={compact} onClick={() => setCompact(!compact)}><i /></button></div><div className="settings-row"><div><b>Firebase sync</b><small>Project changes are synced to your signed-in account.</small></div><span className="preference-status"><i />On</span></div></Panel></div><aside className="settings-side"><Panel title="About" description="A little about this workspace."><div className="about-row"><span>Application</span><b>DesignBoost AI</b></div><div className="about-row"><span>Version</span><b>1.0.0</b></div><div className="about-row"><span>Storage</span><b>Firebase Cloud Firestore</b></div><div className="recommendation"><Sparkles size={15} /><span><b>Your work stays yours</b><small>Your projects are private to your Google account and backed by a local browser copy.</small></span></div></Panel></aside></div>{notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}</div>
+  return <div className="page">
+    <PageTitle eyebrow="WORKSPACE / PREFERENCES" title="Settings" description="Make your workspace feel like yours." />
+    <div className="settings-page-grid">
+      <div className="settings-main">
+        <Panel title="Workspace profile" description="The basics of your DesignBoost workspace.">
+          <div className="settings-profile">
+            <span className="settings-avatar">D</span>
+            <div><strong>{workspaceName}</strong><small>Personal workspace · {projects.length} projects</small></div>
+            <button type="button" className="button-secondary" onClick={editWorkspaceName}>Edit profile</button>
+          </div>
+          <div className="settings-row">
+            <div><b>Active design system</b><small>Default project for new design work.</small></div>
+            <select className="field-control" value={active?.id ?? ''} disabled={!projects.length} onChange={(event) => useDesignStore.getState().setActiveProject(event.target.value)}>
+              {projects.length ? projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>) : <option value="">No projects yet</option>}
+            </select>
+          </div>
+        </Panel>
+        <Panel title="Preferences" description="Configure how DesignBoost behaves.">
+          <div className="settings-row">
+            <div><b>Appearance</b><small>Choose a workspace color theme.</small></div>
+            <div className="theme-choices" role="group" aria-label="Appearance">
+              <button type="button" className={theme === 'light' ? 'selected' : ''} aria-pressed={theme === 'light'} onClick={() => setTheme('light')}><Sun size={14} />Light</button>
+              <button type="button" className={theme === 'dark' ? 'selected' : ''} aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}><Moon size={14} />Dark</button>
+            </div>
+          </div>
+          <div className="settings-row">
+            <div><b>Compact density</b><small>Reduce spacing across panels and tables.</small></div>
+            <button type="button" className={`toggle-switch ${compact ? 'on' : ''}`} aria-label="Toggle compact density" aria-pressed={compact} onClick={() => setCompact(!compact)}><i /></button>
+          </div>
+          <div className="settings-row">
+            <div><b>Firebase sync</b><small>Project changes are synced to your signed-in account.</small></div>
+            <span className="preference-status"><i />On</span>
+          </div>
+        </Panel>
+      </div>
+      <aside className="settings-side">
+        <Panel title="About" description="A little about this workspace.">
+          <div className="about-row"><span>Application</span><b>DesignBoost AI</b></div>
+          <div className="about-row"><span>Version</span><b>1.0.0</b></div>
+          <div className="about-row"><span>Storage</span><b>Firebase Cloud Firestore</b></div>
+          <div className="recommendation"><Sparkles size={15} /><span><b>Your work stays yours</b><small>Your projects are private to your Google account and backed by a local browser copy.</small></span></div>
+        </Panel>
+      </aside>
+    </div>
+    {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
+  </div>
 }

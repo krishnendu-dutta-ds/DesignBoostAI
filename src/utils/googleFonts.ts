@@ -1,8 +1,12 @@
 import googleFonts from '../data/googleFonts.json'
+import { getFontFamilyStack } from './fontFamily'
+
+export { getFontFamilyStack } from './fontFamily'
 
 export type GoogleFont = (typeof googleFonts)[number]
 
 export const GOOGLE_FONTS: GoogleFont[] = googleFonts
+const googleFontStylesheets = new Map<string, Promise<void>>()
 
 export function getGoogleFontUrl(font: GoogleFont) {
   const family = encodeURIComponent(font.family).replace(/%20/g, '+')
@@ -12,15 +16,27 @@ export function getGoogleFontUrl(font: GoogleFont) {
   return `https://fonts.googleapis.com/css2?family=${family}:wght@${weights}&display=swap`
 }
 
+export function ensureGoogleFontLoaded(font: GoogleFont) {
+  const cached = googleFontStylesheets.get(font.family)
+  if (cached) return cached
+
+  const stylesheet = document.createElement('link')
+  stylesheet.rel = 'stylesheet'
+  stylesheet.href = getGoogleFontUrl(font)
+  const loading = new Promise<void>((resolve, reject) => {
+    stylesheet.onload = () => resolve()
+    stylesheet.onerror = () => reject(new Error(`Google Font could not be loaded: ${font.family}`))
+  })
+
+  googleFontStylesheets.set(font.family, loading)
+  document.head.appendChild(stylesheet)
+  void loading.catch(() => googleFontStylesheets.delete(font.family))
+  return loading
+}
+
 export function getGoogleFontSpecimenUrl(font: GoogleFont) {
   const family = encodeURIComponent(font.family).replace(/%20/g, '+')
   return `https://fonts.google.com/specimen/${family}`
-}
-
-export function getFontFamilyStack(family: string, category?: string) {
-  const quotedFamily = `"${family.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-  const fallback = category === 'Serif' ? 'serif' : category === 'Monospace' ? 'monospace' : category === 'Handwriting' ? 'cursive' : 'sans-serif'
-  return `${quotedFamily}, ${fallback}`
 }
 
 export function getGoogleFontCss(font: GoogleFont) {

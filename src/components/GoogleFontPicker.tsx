@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Copy, Search } from 'lucide-react'
 import {
   GOOGLE_FONTS,
+  ensureGoogleFontLoaded,
   getFontFamilyStack,
   getGoogleFontCss,
   getGoogleFontSpecimenUrl,
@@ -58,16 +59,10 @@ export function GoogleFontPicker({ projectName, selectedFamily, selectedWeight, 
 
     let active = true
     setFontStatus('loading')
-    const stylesheet = document.createElement('link')
-    stylesheet.rel = 'stylesheet'
-    stylesheet.href = getGoogleFontUrl(selectedFont)
-    stylesheet.onload = () => { if (active) setFontStatus('ready') }
-    stylesheet.onerror = () => { if (active) setFontStatus('error') }
-    document.head.appendChild(stylesheet)
-    return () => {
-      active = false
-      stylesheet.remove()
-    }
+    void ensureGoogleFontLoaded(selectedFont)
+      .then(() => { if (active) setFontStatus('ready') })
+      .catch(() => { if (active) setFontStatus('error') })
+    return () => { active = false }
   }, [selectedFont])
 
   const copyValue = async (label: string, value: string) => {

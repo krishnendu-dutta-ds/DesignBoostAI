@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Accessibility, Bell, Blocks, BookOpen, ChevronDown, ChevronsLeft, ChevronsRight, CircleHelp,
   Command, Download, FolderKanban, Gauge, LayoutDashboard, LogOut, Menu, Palette,
-  Search, Settings, SlidersHorizontal, Sparkles, Type, X,
+  Moon, Search, Settings, SlidersHorizontal, Sun, Type, X,
 } from 'lucide-react'
 import type { User } from 'firebase/auth'
 import { useDesignStore } from '../../store/useDesignStore'
-import { createFigmaVariablesDocument, createTokensStudioDocument, createWorkspaceBackup, downloadJson } from '../../utils/projectExport'
+import { createTokensStudioDocument, createWorkspaceBackup, downloadJson } from '../../utils/projectExport'
 
 const groups = [
   { title: 'Overview', links: [{ label: 'Dashboard', path: '/', icon: LayoutDashboard }] },
@@ -57,6 +57,8 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const projects = useDesignStore((state) => state.projects)
   const workspaceName = useDesignStore((state) => state.workspaceName)
+  const theme = useDesignStore((state) => state.theme)
+  const setTheme = useDesignStore((state) => state.setTheme)
   const activeProjectId = useDesignStore((state) => state.activeProjectId)
   const setActiveProject = useDesignStore((state) => state.setActiveProject)
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0]
@@ -64,6 +66,10 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
   const profileInitial = profileName.charAt(0).toUpperCase()
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme
+  }, [theme])
   const searchResults = useMemo(
     () => Object.entries(pageNames).filter(([path, label]) => label.toLowerCase().includes(query.toLowerCase()) && path !== '/'),
     [query],
@@ -84,11 +90,10 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
     setExportMenuOpen(false)
     showNotice('Tokens Studio JSON exported for Figma')
   }
-  const exportFigmaVariables = () => {
-    if (!activeProject) return
-    downloadJson(`${projectSlug(activeProject.name)}-figma-variables.json`, createFigmaVariablesDocument(activeProject))
+  const reviewFigmaVariables = () => {
     setExportMenuOpen(false)
-    showNotice('Complete W3C design variables exported for Figma import.')
+    navigate('/tokens')
+    showNotice('Review color, typography, and spacing values before exporting Figma variables.')
   }
 
   return (
@@ -96,7 +101,7 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
       {mobileOpen && <button className="mobile-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
         <div className="brand-row">
-          <Link to="/" className="brand-mark" aria-label="DesignBoost AI home"><Sparkles size={18} /></Link>
+          <Link to="/" className="brand-mark" aria-label="DesignBoost AI home"><Blocks size={16} /></Link>
           {!collapsed && <span className="brand-name">designboost<span>ai</span></span>}
           <button className="icon-button sidebar-collapse" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!collapsed} aria-controls="main-navigation" title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed(!collapsed)}>
             {collapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
@@ -123,9 +128,6 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="usage-card">
-            {!collapsed ? <><div className="usage-head"><span>Workspace usage</span><span>68%</span></div><div className="usage-track"><i /></div><small>68 of 100 tokens used</small></> : <Gauge size={18} />}
-          </div>
           <button className="profile-button" title="Open settings" onClick={() => navigate('/settings')}>
             <span className="profile-avatar">{profileInitial}</span>
             {!collapsed && <><span className="profile-copy"><strong>{profileName}</strong><small>{user.email ?? 'Google account'}</small></span><Settings size={15} /></>}
@@ -150,12 +152,21 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
             {searchOpen && <button className="search-dismiss" aria-label="Close search" onClick={() => setSearchOpen(false)} />}
             <button className="icon-button header-icon" aria-label="Notifications" title="Notifications" onClick={() => showNotice('You’re all caught up')}><Bell size={17} /></button>
             <button className="icon-button header-icon help-button" aria-label="Help" title="Help" onClick={() => showNotice('Use the sidebar to open a tool, or search for a page from the top bar.')}><CircleHelp size={17} /></button>
+            <button
+              type="button"
+              className="icon-button header-icon theme-toggle"
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            >
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
             <div className={`dropdown-wrap header-export ${exportMenuOpen ? 'menu-open' : ''}`}>
               <button className="export-button" aria-expanded={exportMenuOpen} onClick={() => setExportMenuOpen(!exportMenuOpen)}><Download size={15} /><span>Export</span><ChevronDown size={13} /></button>
               <div className="export-menu">
                 <button onClick={exportWorkspace}>All projects backup <small>Full configuration · JSON</small></button>
                 <button disabled={!activeProject} onClick={exportFigmaTokens}>Figma Tokens Studio <small>Tokens Studio plugin · active system</small></button>
-                <button disabled={!activeProject} onClick={exportFigmaVariables}>Figma Variables JSON <small>W3C DTCG · color, spacing, margin and typography</small></button>
+                <button disabled={!activeProject} onClick={reviewFigmaVariables}>Review &amp; export Figma variables <small>Check color, typography, and spacing first</small></button>
               </div>
             </div>
             <span className={`firebase-sync-indicator ${syncStatus}`} role="status"><i />{syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'error' ? 'Sync error' : 'Firebase synced'}</span>
