@@ -233,6 +233,7 @@ export function normalizeProject(project: DesignProject): DesignProject {
   const settings = project.settings ?? defaults
   return {
     ...project,
+    teamId: project.teamId ?? '',
     colors: project.colors.map((color) => ({ ...color })),
     tokens: project.tokens.map((token) => ({ ...token })),
     gradient: { ...createDefaultGradientSettings(project.colors[0]?.value, project.colors[1]?.value), ...project.gradient },
@@ -254,6 +255,7 @@ export function isDesignProject(value: unknown): value is DesignProject {
   return typeof project.id === 'string'
     && typeof project.name === 'string'
     && typeof project.updatedAt === 'string'
+    && (project.teamId === undefined || typeof project.teamId === 'string')
     && Array.isArray(project.colors)
     && project.colors.every((color) => {
       if (!color || typeof color !== 'object') return false

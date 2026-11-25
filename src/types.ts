@@ -44,6 +44,7 @@ export type ProjectSettingsPatch = {
 export type DesignProject = {
   id: string
   name: string
+  teamId: string
   updatedAt: string
   colors: ColorToken[]
   tokens: { name: string; value: string; group: string }[]

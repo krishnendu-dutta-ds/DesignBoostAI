@@ -6,7 +6,7 @@ import {
   Moon, Search, Settings, SlidersHorizontal, Sun, Trash2, Type, X,
 } from 'lucide-react'
 import type { User } from 'firebase/auth'
-import { useDesignStore } from '../../store/useDesignStore'
+import { useDesignStore, useTeamProjects } from '../../store/useDesignStore'
 import { createTokensStudioDocument, createWorkspaceBackup, downloadJson } from '../../utils/projectExport'
 
 const groups = [
@@ -60,7 +60,8 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
   const searchInputRef = useRef<HTMLInputElement>(null)
   const workspaceRef = useRef<HTMLDivElement>(null)
   const exportRef = useRef<HTMLDivElement>(null)
-  const projects = useDesignStore((state) => state.projects)
+  const allProjects = useDesignStore((state) => state.projects)
+  const { projects } = useTeamProjects()
   const teams = useDesignStore((state) => state.teams)
   const activeTeamId = useDesignStore((state) => state.activeTeamId)
   const addTeam = useDesignStore((state) => state.addTeam)
@@ -140,9 +141,9 @@ export function AppShell({ user, syncStatus, syncError, onRetrySync, onSignOut }
     window.setTimeout(() => setNotice(''), 2600)
   }
   const exportWorkspace = () => {
-    downloadJson('designboost-workspace-backup.json', createWorkspaceBackup(projects, activeProjectId))
+    downloadJson('designboost-workspace-backup.json', createWorkspaceBackup(allProjects, activeProjectId))
     setExportMenuOpen(false)
-    showNotice(`${projects.length} project${projects.length === 1 ? '' : 's'} saved in workspace backup`)
+    showNotice(`${allProjects.length} project${allProjects.length === 1 ? '' : 's'} saved in workspace backup`)
   }
   const exportFigmaTokens = () => {
     if (!activeProject) return

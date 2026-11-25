@@ -1,9 +1,10 @@
+import { useMemo } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { initialProjects } from '../data/seed'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
 import type { ColorToken, DesignProject, DesignTeam, GradientSettings, ProjectSettingsPatch } from '../types'
-import type { GeneratedDesignSystem } from '../utils/gemini'
+import type { GeneratedDesignSystem } from '../utils/aiDesign'
 
 type ThemeMode = 'system' | 'dark' | 'light'
 
@@ -45,6 +46,20 @@ type DesignState = {
 
 const updated = (project: DesignProject) => ({ ...project, updatedAt: new Date().toISOString() })
 
+function activeTeamIdOf(state: Pick<DesignState, 'teams' | 'activeTeamId'>) {
+  return state.teams.find((team) => team.id === state.activeTeamId)?.id ?? state.teams[0]?.id ?? ''
+}
+
+function scopedToTeam(projects: DesignProject[], teams: DesignTeam[], teamId: string) {
+  if (!teamId) return projects
+  const knownTeamIds = new Set(teams.map((team) => team.id))
+  return projects.map((project) => (project.teamId && knownTeamIds.has(project.teamId) ? project : { ...project, teamId }))
+}
+
+export function projectsForTeam(projects: DesignProject[], teamId: string) {
+  return teamId ? projects.filter((project) => project.teamId === teamId) : projects
+}
+
 export const useDesignStore = create<DesignState>()(
   persist(
     (set, get) => ({
@@ -69,11 +84,15 @@ export const useDesignStore = create<DesignState>()(
           name,
           createdAt: new Date().toISOString(),
         }
-        set((state) => ({
-          teams: [...state.teams, team],
-          activeTeamId: team.id,
-          workspaceName: team.name,
-        }))
+        set((state) => {
+          const teams = [...state.teams, team]
+          return {
+            teams,
+            activeTeamId: team.id,
+            workspaceName: team.name,
+            projects: scopedToTeam(state.projects, teams, team.id),
+          }
+        })
         return team
       },
       renameTeam: (id, name) =>
@@ -85,8 +104,18 @@ export const useDesignStore = create<DesignState>()(
         set((state) => {
           const teams = state.teams.filter((team) => team.id !== id)
           const nextActive = state.activeTeamId === id ? (teams[0] ?? null) : (teams.find((team) => team.id === state.activeTeamId) ?? teams[0] ?? null)
+          const nextTeamId = nextActive?.id ?? ''
+          const projects = nextTeamId
+            ? state.projects.map((project) => (project.teamId === id ? { ...project, teamId: nextTeamId } : project))
+            : state.projects
+          const teamProjects = projectsForTeam(projects, nextTeamId)
+          const activeProjectId = teamProjects.some((project) => project.id === state.activeProjectId)
+            ? state.activeProjectId
+            : (teamProjects[0]?.id ?? state.activeProjectId)
           return {
             teams,
+            projects,
+            activeProjectId,
             activeTeamId: nextActive?.id ?? '',
             workspaceName: nextActive?.name ?? 'My workspace',
           }
@@ -95,7 +124,12 @@ export const useDesignStore = create<DesignState>()(
         set((state) => {
           const target = state.teams.find((team) => team.id === id)
           if (!target) return state
-          return { activeTeamId: target.id, workspaceName: target.name }
+          const teamProject = state.projects.find((project) => project.teamId === target.id)
+          return {
+            activeTeamId: target.id,
+            workspaceName: target.name,
+            ...(teamProject ? { activeProjectId: teamProject.id } : {}),
+          }
         }),
       replaceTeams: (teams, activeTeamId) =>
         set((state) => {
@@ -107,6 +141,7 @@ export const useDesignStore = create<DesignState>()(
             teams,
             activeTeamId: activeTeam?.id ?? '',
             workspaceName: activeTeam?.name ?? state.workspaceName,
+            projects: activeTeam ? scopedToTeam(state.projects, teams, activeTeam.id) : state.projects,
           }
         }),
       setCompactDensity: (compact) => set({ compactDensity: compact }),
@@ -116,6 +151,7 @@ export const useDesignStore = create<DesignState>()(
           const project: DesignProject = {
             id: `project-${crypto.randomUUID()}`,
             name,
+            teamId: activeTeamIdOf(state),
             updatedAt: new Date().toISOString(),
             colors: [],
             tokens: [],
@@ -145,6 +181,7 @@ export const useDesignStore = create<DesignState>()(
             ...source,
             id: `project-${crypto.randomUUID()}`,
             name: `${source.name} copy`,
+            teamId: source.teamId || activeTeamIdOf(state),
             colors: source.colors.map((color) => ({ ...color })),
             tokens: source.tokens.map((token) => ({ ...token })),
             gradient: { ...source.gradient ?? createDefaultGradientSettings(source.colors[0]?.value, source.colors[1]?.value) },
@@ -296,9 +333,15 @@ export const useDesignStore = create<DesignState>()(
           }),
         })),
       replaceProjects: (projects, activeProjectId) =>
-        set({
-          projects,
-          ...(activeProjectId !== undefined ? { activeProjectId } : {}),
+        set((state) => {
+          const teamId = activeTeamIdOf(state)
+          const nextProjects = scopedToTeam(projects, state.teams, teamId)
+          const teamProjects = projectsForTeam(nextProjects, teamId)
+          const preferredId = activeProjectId !== undefined ? activeProjectId : state.activeProjectId
+          const resolvedActiveId = teamProjects.some((project) => project.id === preferredId)
+            ? preferredId
+            : (teamProjects[0]?.id ?? '')
+          return { projects: nextProjects, activeProjectId: resolvedActiveId }
         }),
     }),
     {
@@ -311,3 +354,13 @@ export const useDesignStore = create<DesignState>()(
     },
   ),
 )
+
+export function useTeamProjects() {
+  const projects = useDesignStore((state) => state.projects)
+  const teams = useDesignStore((state) => state.teams)
+  const activeTeamId = useDesignStore((state) => state.activeTeamId)
+  const team = teams.find((item) => item.id === activeTeamId) ?? teams[0] ?? null
+  const teamId = team?.id ?? ''
+  const teamProjects = useMemo(() => projectsForTeam(projects, teamId), [projects, teamId])
+  return { projects: teamProjects, team }
+}

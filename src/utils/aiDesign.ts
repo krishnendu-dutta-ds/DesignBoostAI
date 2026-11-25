@@ -1,4 +1,5 @@
 import { normalizeHex } from './color'
+import { providerLabel, type AIProvider } from './aiProviders'
 
 export const TOKEN_GROUPS = ['Colors', 'Typography', 'Spacing', 'Radius'] as const
 export type TokenGroup = (typeof TOKEN_GROUPS)[number]
@@ -28,12 +29,40 @@ export type GeneratedDesignSystem = {
   tokens: GeneratedToken[]
 }
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+export type AIGenerationAction = { label: string; url: string }
+
+/** A generation failure that can point the user at a fix, such as adding credits. */
+export class AIGenerationError extends Error {
+  action?: AIGenerationAction
+
+  constructor(message: string, action?: AIGenerationAction) {
+    super(message)
+    this.name = 'AIGenerationError'
+    this.action = action
+  }
+}
+
+const GEMINI_MODEL = 'gemini-3.8-flash'
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
+const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENROUTER_MODEL = 'google/gemini-3.8-flash'
+const OPENAI_ENDPOINT = 'https://api.openai.com/v1/chat/completions'
+/** Current OpenAI chat models, tried in order when an account cannot use the first one. */
+const OPENAI_MODELS = ['gpt-5.4-mini', 'gpt-5.4', 'gpt-4.1-mini']
 const COLOR_CATEGORIES = ['Brand', 'Surface', 'Text', 'Status']
 const TEXT_TRANSFORMS = ['none', 'uppercase', 'capitalize']
 
-const responseSchema = {
+type ResponseSchema = {
+  type: string
+  description?: string
+  enum?: string[]
+  properties?: Record<string, ResponseSchema>
+  items?: ResponseSchema
+  required?: string[]
+  propertyOrdering?: string[]
+}
+
+const responseSchema: ResponseSchema = {
   type: 'OBJECT',
   properties: {
     name: { type: 'STRING', description: 'A short name for the generated design system.' },
@@ -94,6 +123,22 @@ const responseSchema = {
   propertyOrdering: ['name', 'description', 'colors', 'typography', 'spacing', 'tokens'],
 }
 
+/** Convert the Gemini style schema into standard JSON Schema for OpenRouter structured outputs. */
+function toJsonSchema(node: ResponseSchema): Record<string, unknown> {
+  const schema: Record<string, unknown> = { type: node.type.toLowerCase() }
+  if (node.description) schema.description = node.description
+  if (node.enum) schema.enum = node.enum
+  if (node.properties) {
+    schema.properties = Object.fromEntries(
+      Object.entries(node.properties).map(([key, value]) => [key, toJsonSchema(value)]),
+    )
+    schema.additionalProperties = false
+  }
+  if (node.required) schema.required = node.required
+  if (node.items) schema.items = toJsonSchema(node.items)
+  return schema
+}
+
 function buildPrompt(brief: string, projectName: string) {
   return [
     `You are a senior design systems engineer. Create a complete design system for the project "${projectName}".`,
@@ -114,6 +159,11 @@ function buildPrompt(brief: string, projectName: string) {
 
 type GeminiPayload = {
   candidates?: { content?: { parts?: { text?: string }[] } }[]
+  error?: { message?: string }
+}
+
+type OpenRouterPayload = {
+  choices?: { message?: { content?: string | { text?: string }[] } }[]
   error?: { message?: string }
 }
 
@@ -189,7 +239,7 @@ function normalizeColors(value: unknown): GeneratedColor[] {
     if (colors.length === 12) break
   }
 
-  if (!colors.length) throw new Error('Gemini did not return any usable colors. Try a more specific prompt.')
+  if (!colors.length) throw new Error('The model did not return any usable colors. Try a more specific prompt.')
   return colors
 }
 
@@ -268,12 +318,29 @@ function normalizeGeneratedDesign(value: unknown): GeneratedDesignSystem {
   }
 }
 
-export async function generateDesignSystem(apiKey: string, brief: string, projectName: string): Promise<GeneratedDesignSystem> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings before generating a design.')
+function extractJsonObject(text: string) {
+  const cleaned = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+  if (cleaned.startsWith('{') && cleaned.endsWith('}')) return cleaned
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  return start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned
+}
 
+function parseGeneratedDesign(text: string): GeneratedDesignSystem {
+  if (!text.trim()) throw new Error('The model returned an empty response. Try a more specific prompt.')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(extractJsonObject(text))
+  } catch {
+    throw new Error('The model returned a response that was not valid JSON. Try again.')
+  }
+  return normalizeGeneratedDesign(parsed)
+}
+
+async function generateWithGemini(apiKey: string, brief: string, projectName: string): Promise<GeneratedDesignSystem> {
   let response: Response
   try {
-    response = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey.trim())}`, {
+    response = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -309,15 +376,156 @@ export async function generateDesignSystem(apiKey: string, brief: string, projec
   }
 
   const text = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('').trim() ?? ''
-  if (!text) throw new Error('Gemini returned an empty response. Try a more specific prompt.')
+  return parseGeneratedDesign(text)
+}
 
-  const cleaned = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
-  let parsed: unknown
+async function sendBearerRequest(
+  apiKey: string,
+  body: Record<string, unknown>,
+  url = OPENROUTER_ENDPOINT,
+  unreachable = 'Could not reach OpenRouter. Check your connection and try again.',
+) {
+  let response: Response
   try {
-    parsed = JSON.parse(cleaned)
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    })
   } catch {
-    throw new Error('Gemini returned a response that was not valid JSON. Try again.')
+    throw new AIGenerationError(unreachable)
   }
 
-  return normalizeGeneratedDesign(parsed)
+  let payload: OpenRouterPayload | null = null
+  try {
+    payload = await response.json() as OpenRouterPayload
+  } catch {
+    payload = null
+  }
+
+  return { response, payload }
+}
+
+function openRouterError(status: number, message: string) {
+  if (status === 401 || status === 403) {
+    return new AIGenerationError(
+      'OpenRouter rejected this API key. Check the key saved in Settings and try again.',
+      { label: 'Check your OpenRouter keys', url: 'https://openrouter.ai/keys' },
+    )
+  }
+  if (status === 402) {
+    return new AIGenerationError(
+      'This OpenRouter account has no credits left. Add credits at openrouter.ai/credits and generate again — or save a Gemini API key in Settings to use Google\'s free tier instead.',
+      { label: 'Add OpenRouter credits', url: 'https://openrouter.ai/credits' },
+    )
+  }
+  if (status === 429) return new AIGenerationError('OpenRouter is rate limiting this key. Wait a moment and try again.')
+  if (status === 404 || status === 503) return new AIGenerationError('OpenRouter could not reach a model for this request. Check the OpenRouter status page, then try again.')
+  return new AIGenerationError(message ? `OpenRouter error: ${message}` : `OpenRouter request failed with status ${status}.`)
+}
+
+function openAIError(status: number, message: string) {
+  if (status === 401 || status === 403) {
+    return new AIGenerationError(
+      'OpenAI rejected this API key. Check the key saved in Settings and try again.',
+      { label: 'Check your OpenAI keys', url: 'https://platform.openai.com/api-keys' },
+    )
+  }
+  if (status === 402 || (status === 400 && /billing|quota|credit/i.test(message))) {
+    return new AIGenerationError(
+      'This OpenAI account cannot be billed for this request. Check the billing and usage limits on platform.openai.com, then generate again — or use a Gemini API key in Settings instead.',
+      { label: 'Open OpenAI billing', url: 'https://platform.openai.com/settings/organization/billing/overview' },
+    )
+  }
+  if (status === 429) return new AIGenerationError('OpenAI is rate limiting this key or the account is out of quota. Wait a moment and try again.')
+  if (status === 404) {
+    return new AIGenerationError(
+      `This OpenAI key cannot use any of the models this app requests (${OPENAI_MODELS.join(', ')}). Check the model access on your OpenAI account, then try again.`,
+      { label: 'Open OpenAI models', url: 'https://platform.openai.com/settings/organization/limits' },
+    )
+  }
+  return new AIGenerationError(message ? `OpenAI error: ${message}` : `OpenAI request failed with status ${status}.`)
+}
+
+async function generateWithOpenAI(apiKey: string, brief: string, projectName: string): Promise<GeneratedDesignSystem> {
+  const messages = [
+    { role: 'system', content: 'You are a senior design systems engineer. Reply with one JSON object that matches the requested schema, with no markdown or commentary.' },
+    { role: 'user', content: buildPrompt(brief, projectName) },
+  ]
+  const schema = toJsonSchema(responseSchema)
+  let response: Response | null = null
+  let payload: OpenRouterPayload | null = null
+
+  for (const model of OPENAI_MODELS) {
+    const attempt = await sendBearerRequest(apiKey, {
+      model,
+      messages,
+      response_format: { type: 'json_schema', json_schema: { name: 'design_system', strict: true, schema } },
+    }, OPENAI_ENDPOINT, 'Could not reach OpenAI. Check your connection and try again.')
+    response = attempt.response
+    payload = attempt.payload
+    if (response.ok) break
+    const rejection = payload?.error?.message ?? ''
+    const modelUnavailable = response.status === 404 || (response.status === 400 && /model/i.test(rejection))
+    if (!modelUnavailable) break
+  }
+
+  if (!response) throw new AIGenerationError('OpenAI could not start a request. Try again.')
+  if (!response.ok) throw openAIError(response.status, payload?.error?.message ?? '')
+
+  const content = payload?.choices?.[0]?.message?.content
+  const text = typeof content === 'string'
+    ? content
+    : Array.isArray(content) ? content.map((part) => part?.text ?? '').join('') : ''
+  return parseGeneratedDesign(text)
+}
+
+async function generateWithOpenRouter(apiKey: string, brief: string, projectName: string): Promise<GeneratedDesignSystem> {
+  const request = {
+    model: OPENROUTER_MODEL,
+    messages: [
+      { role: 'system', content: 'You are a senior design systems engineer. Reply with one JSON object that matches the requested schema, with no markdown or commentary.' },
+      { role: 'user', content: buildPrompt(brief, projectName) },
+    ],
+    temperature: 0.6,
+  }
+
+  let { response, payload } = await sendBearerRequest(apiKey, {
+    ...request,
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'design_system', strict: true, schema: toJsonSchema(responseSchema) },
+    },
+  })
+
+  const rejection = payload?.error?.message ?? ''
+  if (!response.ok && response.status === 400 && /json|schema|response_format|structured/i.test(rejection)) {
+    const fallback = await sendBearerRequest(apiKey, { ...request, response_format: { type: 'json_object' } })
+    response = fallback.response
+    payload = fallback.payload
+  }
+
+  if (!response.ok) throw openRouterError(response.status, payload?.error?.message ?? '')
+
+  const content = payload?.choices?.[0]?.message?.content
+  const text = typeof content === 'string'
+    ? content
+    : Array.isArray(content) ? content.map((part) => part?.text ?? '').join('') : ''
+  return parseGeneratedDesign(text)
+}
+
+export async function generateDesignSystem(
+  provider: AIProvider,
+  apiKey: string,
+  brief: string,
+  projectName: string,
+): Promise<GeneratedDesignSystem> {
+  const trimmedKey = apiKey.trim()
+  if (!trimmedKey) throw new Error(`Add your ${providerLabel(provider)} API key in Settings before generating a design.`)
+  if (provider === 'openrouter') return generateWithOpenRouter(trimmedKey, brief, projectName)
+  if (provider === 'openai') return generateWithOpenAI(trimmedKey, brief, projectName)
+  return generateWithGemini(trimmedKey, brief, projectName)
 }

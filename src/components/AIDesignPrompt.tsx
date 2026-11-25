@@ -1,41 +1,54 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, KeyRound, LoaderCircle, Plus, Sparkles } from 'lucide-react'
-import { useDesignStore } from '../store/useDesignStore'
-import { useGeminiKey } from '../firebase/geminiKey'
-import { generateDesignSystem, type GeneratedDesignSystem } from '../utils/gemini'
+import { useDesignStore, useTeamProjects } from '../store/useDesignStore'
+import { activeProvider, keyAvailable, useAIKey } from '../firebase/aiKey'
+import { providerInfo } from '../utils/aiProviders'
+import {
+  AIGenerationError,
+  generateDesignSystem,
+  type AIGenerationAction,
+  type GeneratedDesignSystem,
+} from '../utils/aiDesign'
+
+type PromptError = { message: string; action?: AIGenerationAction }
 
 export function AIDesignPrompt({ notify }: { notify: (message: string) => void }) {
-  const projects = useDesignStore((state) => state.projects)
+  const { projects } = useTeamProjects()
   const activeProjectId = useDesignStore((state) => state.activeProjectId)
   const applyGeneratedDesign = useDesignStore((state) => state.applyGeneratedDesign)
-  const apiKey = useGeminiKey((state) => state.apiKey)
-  const enabled = useGeminiKey((state) => state.enabled)
-  const keyStatus = useGeminiKey((state) => state.status)
-  const keyError = useGeminiKey((state) => state.error)
-  const loadKey = useGeminiKey((state) => state.load)
-  const setEnabled = useGeminiKey((state) => state.setEnabled)
+  const keys = useAIKey((state) => state.keys)
+  const enabledMap = useAIKey((state) => state.enabled)
+  const keyStatus = useAIKey((state) => state.status)
+  const keyError = useAIKey((state) => state.error)
+  const loadKeys = useAIKey((state) => state.load)
+  const setEnabled = useAIKey((state) => state.setEnabled)
   const [prompt, setPrompt] = useState('')
   const [targetProjectId, setTargetProjectId] = useState('')
   const [generating, setGenerating] = useState(false)
   const [activating, setActivating] = useState(false)
   const [draft, setDraft] = useState<GeneratedDesignSystem | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<PromptError | null>(null)
 
-  useEffect(() => { void loadKey() }, [loadKey])
+  useEffect(() => { void loadKeys() }, [loadKeys])
+
+  const provider = activeProvider(keys, enabledMap)
+  const pendingProvider = provider || keyAvailable(keys)
+  const providerName = pendingProvider ? providerInfo(pendingProvider).label : ''
 
   const project = projects.find((item) => item.id === targetProjectId)
     ?? projects.find((item) => item.id === activeProjectId)
     ?? projects[0]
 
   const activate = async () => {
+    if (!pendingProvider) return
     setActivating(true)
-    setError('')
+    setError(null)
     try {
-      await setEnabled(true)
-      notify('AI generation activated')
+      await setEnabled(pendingProvider, true)
+      notify(`${providerName} AI generation activated`)
     } catch (activationError) {
-      setError(activationError instanceof Error ? activationError.message : 'Could not activate AI generation.')
+      setError({ message: activationError instanceof Error ? activationError.message : 'Could not activate AI generation.' })
     } finally {
       setActivating(false)
     }
@@ -43,15 +56,17 @@ export function AIDesignPrompt({ notify }: { notify: (message: string) => void }
 
   const generate = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!project || !prompt.trim()) return
+    if (!project || !prompt.trim() || !provider) return
     setGenerating(true)
-    setError('')
+    setError(null)
     try {
-      const generated = await generateDesignSystem(apiKey, prompt.trim(), project.name)
+      const generated = await generateDesignSystem(provider, keys[provider], prompt.trim(), project.name)
       setDraft(generated)
       notify(`${generated.name} generated, review it below`)
     } catch (generationError) {
-      setError(generationError instanceof Error ? generationError.message : 'Design generation failed.')
+      setError(generationError instanceof AIGenerationError
+        ? { message: generationError.message, action: generationError.action }
+        : { message: generationError instanceof Error ? generationError.message : 'Design generation failed.' })
     } finally {
       setGenerating(false)
     }
@@ -68,15 +83,15 @@ export function AIDesignPrompt({ notify }: { notify: (message: string) => void }
   return <section className="panel ai-token-panel ai-prompt-panel">
     <div className="panel-heading">
       <div><h2>AI design prompt</h2><p>Generate a complete design system — colors, typography, spacing and tokens — from one prompt instead of building it by hand.</p></div>
-      {apiKey && enabled && <span className="preference-status"><i />AI active</span>}
+      {provider && <span className="preference-status"><i />AI active · {providerInfo(provider).label}</span>}
     </div>
-    {!apiKey ? <div className="ai-key-missing">
+    {!pendingProvider ? <div className="ai-key-missing">
       <KeyRound size={17} />
-      <div><b>Add your Gemini API key</b><small>{keyStatus === 'loading' ? 'Checking your saved key…' : keyError || 'Each signed-in user connects their own key. It is stored privately in your account.'}</small></div>
+      <div><b>Add a Gemini, OpenRouter or OpenAI API key</b><small>{keyStatus === 'loading' ? 'Checking your saved keys…' : keyError || 'Each signed-in user connects their own key. It is stored privately in your account, and any activated provider can generate a full design system.'}</small></div>
       <Link className="button-secondary compact" to="/settings">Open settings <ArrowRight size={13} /></Link>
-    </div> : !enabled ? <div className="ai-key-missing">
+    </div> : !provider ? <div className="ai-key-missing">
       <Sparkles size={17} />
-      <div><b>Activate AI generation</b><small>Your key is saved. Activate AI for this account to open the prompt panel and generate full design systems.</small></div>
+      <div><b>Activate {providerName} AI</b><small>Your {providerName} key is saved. Activate AI for this account to open the prompt panel and generate full design systems.</small></div>
       <button className="button-primary compact" type="button" disabled={activating} onClick={() => void activate()}>{activating ? 'Activating…' : 'Activate AI'}</button>
     </div> : !project ? <div className="ai-key-missing">
       <KeyRound size={17} />
@@ -96,11 +111,11 @@ export function AIDesignPrompt({ notify }: { notify: (message: string) => void }
           </div>
         </div>
         <div className="ai-prompt-actions">
-          <small>Gemini returns a full system: a palette, type scale, spacing, radius and tokens — all cleaned and ready to apply.</small>
+          <small>Generating with {providerName}. The result is a full system: a palette, type scale, spacing, radius and tokens — all cleaned and ready to apply.</small>
           <button className="button-primary" type="submit" disabled={generating || !prompt.trim()}>{generating ? <><LoaderCircle size={15} className="firebase-spinner" /> Generating…</> : <><Sparkles size={15} /> Generate design system</>}</button>
         </div>
       </form>
-      {error && <div className="firebase-auth-error" role="alert">{error}</div>}
+      {error && <div className="firebase-auth-error" role="alert">{error.message}{error.action && <a href={error.action.url} target="_blank" rel="noreferrer">{error.action.label}</a>}</div>}
       {draft && <div className="ai-generated">
         <div className="ai-generated-head"><div><strong>{draft.name}</strong><small>{draft.description || 'Generated from your prompt'}</small></div><span className="token-group">{project.name}</span></div>
         <div className="ai-design-summary">

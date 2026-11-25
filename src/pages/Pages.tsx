@@ -4,14 +4,15 @@ import {
   ArrowRight, Check, CheckCircle2, ChevronDown, Copy, Download, Eye, FolderKanban, Gauge,
   LayoutGrid, Monitor, Moon, MoreHorizontal, Palette, Pencil, Plus, Search, Sparkles, Sun, Trash2, TriangleAlert, Type, Upload, X,
 } from 'lucide-react'
-import { useDesignStore } from '../store/useDesignStore'
+import { useDesignStore, useTeamProjects } from '../store/useDesignStore'
 import { createDefaultGradientSettings, createDefaultProjectSettings } from '../data/defaults'
 import { createTypographyStyleTokens, TYPOGRAPHY_SCALE } from '../data/typographyScale'
 import { websitePalettes } from '../data/websitePalettes'
 import { contrastRatio, createGradientCss, createPaletteCss, hexFromHsl, hslFromHex, normalizeHex, rgbFromHex } from '../utils/color'
 import { getFontFamilyStack } from '../utils/fontFamily'
 import { createFigmaVariablesDocument, downloadJson, isDesignProject, isWorkspaceBackup, normalizeProject } from '../utils/projectExport'
-import { GEMINI_KEY_URL, useGeminiKey } from '../firebase/geminiKey'
+import { useAIKey } from '../firebase/aiKey'
+import { AI_PROVIDERS, providerInfo, type AIProvider } from '../utils/aiProviders'
 import { AIDesignPrompt } from '../components/AIDesignPrompt'
 
 const GoogleFontPicker = lazy(() => import('../components/GoogleFontPicker').then((module) => ({ default: module.GoogleFontPicker })))
@@ -72,11 +73,12 @@ function downloadText(filename: string, value: string, type = 'application/json'
 }
 
 export function DashboardPage() {
-  const projects = useDesignStore((state) => state.projects)
+  const { projects, team } = useTeamProjects()
   const recentProjects = [...projects].sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
-  const active = useDesignStore((state) => state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0])
+  const activeProjectId = useDesignStore((state) => state.activeProjectId)
+  const active = projects.find((project) => project.id === activeProjectId) ?? projects[0]
   const stats = [
-    { label: 'Design systems', value: projects.length.toString(), detail: 'In this workspace', icon: FolderKanban },
+    { label: 'Design systems', value: projects.length.toString(), detail: team ? `In ${team.name}` : 'In this workspace', icon: FolderKanban },
     { label: 'Colors', value: projects.reduce((total, project) => total + project.colors.length, 0).toString(), detail: 'Across your systems', icon: Palette },
     { label: 'Tokens', value: projects.reduce((total, project) => total + project.tokens.length, 0).toString(), detail: 'Across your systems', icon: LayoutGrid },
   ]
@@ -348,7 +350,9 @@ const tokenGroups = ['All tokens', 'Colors', 'Typography', 'Spacing', 'Radius']
 type LibraryToken = { name: string; value: string; group: string; source: 'library' | 'studio' }
 
 export function TokensPage() {
-  const project = useDesignStore((state) => state.projects.find((item) => item.id === state.activeProjectId) ?? state.projects[0])
+  const { projects: teamProjects } = useTeamProjects()
+  const activeProjectId = useDesignStore((state) => state.activeProjectId)
+  const project = teamProjects.find((item) => item.id === activeProjectId) ?? teamProjects[0]
   const addToken = useDesignStore((state) => state.addToken)
   const removeToken = useDesignStore((state) => state.removeToken)
   const updateToken = useDesignStore((state) => state.updateToken)
@@ -457,7 +461,9 @@ export function TokensPage() {
 }
 
 export function ProjectsPage() {
-  const projects = useDesignStore((state) => state.projects)
+  const allProjects = useDesignStore((state) => state.projects)
+  const { projects, team } = useTeamProjects()
+  const teamId = team?.id ?? ''
   const sortedProjects = [...projects].sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
   const activeProjectId = useDesignStore((state) => state.activeProjectId)
   const addProject = useDesignStore((state) => state.addProject)
@@ -513,21 +519,21 @@ export function ProjectsPage() {
           const activeId = parsed.projects.some((project) => project.id === parsed.activeProjectId)
             ? parsed.activeProjectId
             : (parsed.projects[0]?.id ?? '')
-          replaceProjects(parsed.projects.map(normalizeProject), activeId)
+          replaceProjects(parsed.projects.map((project) => ({ ...normalizeProject(project), teamId })), activeId)
           notify(`Workspace restored · ${parsed.projects.length} project${parsed.projects.length === 1 ? '' : 's'} · syncing to your account`)
           return
         }
         if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isDesignProject)) {
           if (!window.confirm(`Import ${parsed.length} projects and replace the current workspace?`)) return
-          const restored = parsed.map(normalizeProject)
+          const restored = parsed.map((project) => ({ ...normalizeProject(project), teamId }))
           replaceProjects(restored, restored[0].id)
           notify(`${parsed.length} projects restored · syncing to your account`)
           return
         }
         if (isDesignProject(parsed)) {
-          const alreadyExists = projects.some((project) => project.id === parsed.id)
-          const restored = normalizeProject(parsed)
-          replaceProjects([restored, ...projects.filter((project) => project.id !== restored.id)])
+          const alreadyExists = allProjects.some((project) => project.id === parsed.id)
+          const restored = { ...normalizeProject(parsed), teamId }
+          replaceProjects([restored, ...allProjects.filter((project) => project.id !== restored.id)])
           notify(`${alreadyExists ? `${parsed.name} configuration restored` : `${parsed.name} imported`} · syncing to your account`)
           return
         }
@@ -538,15 +544,15 @@ export function ProjectsPage() {
     }
     reader.readAsText(file)
   }
-  return <div className="page"><PageTitle eyebrow="WORKSPACE / PROJECTS" title="Your projects" description="Manage design systems for every product and team."><label className="button-secondary file-button"><Upload size={15} /> Restore / import JSON<input type="file" accept="application/json,.json" onChange={(event) => { importFile(event.target.files?.[0]); event.currentTarget.value = '' }} /></label></PageTitle>
-    <form className="create-project-bar" onSubmit={createProject}><span className="new-project-icon"><Plus size={18} /></span><div><strong>Start a new design system</strong><small>Set up a shared foundation for your next product.</small></div><input ref={inputRef} className="field-control" placeholder="Name your project..." value={name} onChange={(event) => setName(event.target.value)} required /><button className="button-primary" type="submit"><Plus size={15} /> Create</button></form>
-    <div className="projects-heading"><div><h2>All projects <span>{projects.length}</span></h2><p>Saved to your cloud account</p></div><span className="select-small">Sorted by last modified</span></div>
+  return <div className="page"><PageTitle eyebrow="WORKSPACE / PROJECTS" title="Your projects" description="Manage the design systems inside the design team you have selected."><label className="button-secondary file-button"><Upload size={15} /> Restore / import JSON<input type="file" accept="application/json,.json" onChange={(event) => { importFile(event.target.files?.[0]); event.currentTarget.value = '' }} /></label></PageTitle>
+    <form className="create-project-bar" onSubmit={createProject}><span className="new-project-icon"><Plus size={18} /></span><div><strong>Start a new design system</strong><small>{team ? `Created in ${team.name}.` : 'Set up a shared foundation for your next product.'}</small></div><input ref={inputRef} className="field-control" placeholder="Name your project..." value={name} onChange={(event) => setName(event.target.value)} required /><button className="button-primary" type="submit"><Plus size={15} /> Create</button></form>
+    <div className="projects-heading"><div><h2>All projects <span>{projects.length}</span></h2><p>{team ? `In ${team.name} · Saved to your cloud account` : 'Saved to your cloud account'}</p></div><span className="select-small">Sorted by last modified</span></div>
     <div className="projects-grid">{sortedProjects.map((project) => <article className={`project-card ${activeProjectId === project.id ? 'current' : ''}`} key={project.id}><div className={`project-card-art ${openMenuId === project.id ? 'menu-open' : ''}`}><div className="project-art-swatches">{project.colors.length ? project.colors.slice(0, 5).map((color) => <i key={color.name} style={{ background: color.value }} title={color.name} />) : <span>No colors added yet</span>}</div><button type="button" className="icon-button art-menu" aria-expanded={openMenuId === project.id} title="More project actions" onClick={() => { setOpenMenuId((current) => current === project.id ? null : project.id); setConfirmDeleteId(null) }}><MoreHorizontal size={17} /></button><div className="project-menu"><button type="button" onClick={() => { setRenamingId(project.id); setRenameDraft(project.name); setOpenMenuId(null) }}>Rename</button><button type="button" onClick={() => { duplicateProject(project.id); setOpenMenuId(null); notify('Project duplicated; syncing to your account') }}>Duplicate</button>{confirmDeleteId === project.id ? <button type="button" className="danger-text" onClick={() => { deleteProject(project.id); setOpenMenuId(null); setConfirmDeleteId(null); notify('Project deleted; syncing to your account') }}>Confirm delete</button> : <button type="button" className="danger-text" onClick={() => setConfirmDeleteId(project.id)}>Delete</button>}</div></div><div className="project-card-body"><div className="project-card-title">{renamingId === project.id ? <form className="inline-rename-form" onSubmit={(event) => { event.preventDefault(); if (renameDraft.trim()) { renameProject(project.id, renameDraft.trim()); notify('Project renamed; syncing to your account') } setRenamingId(null) }}><input className="field-control compact-input" autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenamingId(null) }} /><button type="submit" className="button-primary compact">Save</button><button type="button" className="button-secondary compact" onClick={() => setRenamingId(null)}>Cancel</button></form> : <><h3>{project.name}</h3>{activeProjectId === project.id && <span className="active-badge">Active</span>}</>}</div><p>{project.colors.length} colors <i /> {project.tokens.length} tokens <i /> Edited {new Date(project.updatedAt).toLocaleDateString()}</p><div className="project-card-bottom"><div className="mini-palette">{project.colors.slice(0, 6).map((color) => <i key={color.name} style={{ background: color.value }} />)}</div>{activeProjectId === project.id ? <button type="button" className="button-primary compact" disabled aria-current="true"><Check size={13} /> Active</button> : <button type="button" className="button-secondary compact" onClick={() => { setActiveProject(project.id); notify(`${project.name} is now active`) }}>Set active <ArrowRight size={13} /></button>}</div></div></article>)}</div>
     {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}</div>
 }
 
 export function SettingsPage() {
-  const projects = useDesignStore((state) => state.projects)
+  const { projects } = useTeamProjects()
   const active = useDesignStore((state) => state.projects.find((project) => project.id === state.activeProjectId))
   const teams = useDesignStore((state) => state.teams)
   const activeTeamId = useDesignStore((state) => state.activeTeamId)
@@ -559,17 +565,17 @@ export function SettingsPage() {
   const setCompact = useDesignStore((state) => state.setCompactDensity)
   const theme = useDesignStore((state) => state.theme)
   const setTheme = useDesignStore((state) => state.setTheme)
-  const geminiApiKey = useGeminiKey((state) => state.apiKey)
-  const geminiEnabled = useGeminiKey((state) => state.enabled)
-  const geminiKeyStatus = useGeminiKey((state) => state.status)
-  const geminiKeyError = useGeminiKey((state) => state.error)
-  const loadGeminiKey = useGeminiKey((state) => state.load)
-  const saveGeminiKey = useGeminiKey((state) => state.save)
-  const removeGeminiKey = useGeminiKey((state) => state.remove)
-  const setGeminiEnabled = useGeminiKey((state) => state.setEnabled)
-  const [keyDraft, setKeyDraft] = useState('')
-  const [savingKey, setSavingKey] = useState(false)
-  useEffect(() => { void loadGeminiKey() }, [loadGeminiKey])
+  const aiKeys = useAIKey((state) => state.keys)
+  const aiEnabled = useAIKey((state) => state.enabled)
+  const aiKeyStatus = useAIKey((state) => state.status)
+  const aiKeyError = useAIKey((state) => state.error)
+  const loadAiKeys = useAIKey((state) => state.load)
+  const saveAiKey = useAIKey((state) => state.save)
+  const removeAiKey = useAIKey((state) => state.remove)
+  const setAiEnabled = useAIKey((state) => state.setEnabled)
+  const [keyDrafts, setKeyDrafts] = useState<Record<AIProvider, string>>({ gemini: '', openrouter: '', openai: '' })
+  const [savingProvider, setSavingProvider] = useState<AIProvider | ''>('')
+  useEffect(() => { void loadAiKeys() }, [loadAiKeys])
   const activeTeam = teams.find((team) => team.id === activeTeamId) ?? teams[0]
   const activeTeamName = activeTeam?.name ?? workspaceName
   const [editingProfile, setEditingProfile] = useState(false)
@@ -593,47 +599,48 @@ export function SettingsPage() {
     setNewTeamName('')
     notify(`${created.name} created`)
   }
-  const toggleAiGeneration = async () => {
-    if (!geminiApiKey) {
-      notify('Save a Gemini API key first')
+  const saveProviderKey = async (event: React.FormEvent, provider: AIProvider) => {
+    event.preventDefault()
+    const draft = keyDrafts[provider]
+    if (!draft.trim()) {
+      notify(`Paste your ${providerInfo(provider).label} API key first`)
       return
     }
-    setSavingKey(true)
+    setSavingProvider(provider)
     try {
-      await setGeminiEnabled(!geminiEnabled)
-      notify(geminiEnabled ? 'AI generation deactivated' : 'AI generation activated')
+      await saveAiKey(provider, draft)
+      setKeyDrafts((current) => ({ ...current, [provider]: '' }))
+      notify(`${providerInfo(provider).label} API key saved to your account`)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : `Could not save the ${providerInfo(provider).label} API key`)
+    } finally {
+      setSavingProvider('')
+    }
+  }
+  const clearProviderKey = async (provider: AIProvider) => {
+    setSavingProvider(provider)
+    try {
+      await removeAiKey(provider)
+      notify(`${providerInfo(provider).label} API key removed`)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : `Could not remove the ${providerInfo(provider).label} API key`)
+    } finally {
+      setSavingProvider('')
+    }
+  }
+  const toggleProviderAi = async (provider: AIProvider) => {
+    if (!aiKeys[provider]) {
+      notify(`Save a ${providerInfo(provider).label} API key first`)
+      return
+    }
+    setSavingProvider(provider)
+    try {
+      await setAiEnabled(provider, !aiEnabled[provider])
+      notify(`${providerInfo(provider).label} AI generation ${aiEnabled[provider] ? 'deactivated' : 'activated'}`)
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Could not update AI generation')
     } finally {
-      setSavingKey(false)
-    }
-  }
-  const saveApiKey = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!keyDraft.trim()) {
-      notify('Paste your Gemini API key first')
-      return
-    }
-    setSavingKey(true)
-    try {
-      await saveGeminiKey(keyDraft)
-      setKeyDraft('')
-      notify('Gemini API key saved to your account')
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Could not save the Gemini API key')
-    } finally {
-      setSavingKey(false)
-    }
-  }
-  const clearApiKey = async () => {
-    setSavingKey(true)
-    try {
-      await removeGeminiKey()
-      notify('Gemini API key removed')
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Could not remove the Gemini API key')
-    } finally {
-      setSavingKey(false)
+      setSavingProvider('')
     }
   }
   return <div className="page">
@@ -696,36 +703,47 @@ export function SettingsPage() {
             <span className="preference-status"><i />On</span>
           </div>
         </Panel>
-        <Panel title="AI design generation" description="Connect your own Gemini API key, then activate AI to generate a complete design system from a prompt.">
-          <form className="settings-ai-key" onSubmit={saveApiKey}>
-            <label className="field-label" htmlFor="gemini-api-key">Gemini API key</label>
-            <div className="settings-ai-key-row">
-              <input
-                id="gemini-api-key"
-                className="field-control"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={geminiApiKey ? `Saved key ending in ${geminiApiKey.slice(-4)}` : 'Paste your Gemini API key'}
-                value={keyDraft}
-                onChange={(event) => setKeyDraft(event.target.value)}
-              />
-              <button className="button-primary" type="submit" disabled={savingKey || geminiKeyStatus === 'loading'}>{savingKey ? 'Saving…' : geminiApiKey ? 'Replace key' : 'Save key'}</button>
-              {geminiApiKey && <button className="button-secondary" type="button" disabled={savingKey} onClick={() => void clearApiKey()}>Remove</button>}
+                <Panel title="AI design generation" description="Connect your own Gemini, OpenRouter or OpenAI API key, then activate AI to generate a complete design system from a prompt.">
+          {AI_PROVIDERS.map((option) => {
+            const savedKey = aiKeys[option.id]
+            const busy = savingProvider === option.id
+            const activated = aiEnabled[option.id]
+            return <div className="settings-ai-provider" key={option.id}>
+              <div className="settings-ai-provider-head"><b>{option.label}</b><small>{option.note}</small></div>
+              <form className="settings-ai-key" onSubmit={(event) => void saveProviderKey(event, option.id)}>
+                <label className="field-label" htmlFor={`${option.id}-api-key`}>{option.keyLabel}</label>
+                <div className="settings-ai-key-row">
+                  <input
+                    id={`${option.id}-api-key`}
+                    className="field-control"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={savedKey ? `Saved key ending in ${savedKey.slice(-4)}` : `Paste your ${option.label} API key`}
+                    value={keyDrafts[option.id]}
+                    onChange={(event) => setKeyDrafts((current) => ({ ...current, [option.id]: event.target.value }))}
+                  />
+                  <button className="button-primary" type="submit" disabled={busy || aiKeyStatus === 'loading'}>{busy ? 'Saving…' : savedKey ? 'Replace key' : 'Save key'}</button>
+                  {savedKey && <button className="button-secondary" type="button" disabled={busy} onClick={() => void clearProviderKey(option.id)}>Remove</button>}
+                </div>
+                <div className="settings-ai-meta">
+                  <span className={`preference-status ${savedKey ? '' : 'off'}`}><i />{savedKey ? 'Key saved to your account' : 'No key saved'}</span>
+                  <a className="text-link" href={option.keyUrl} target="_blank" rel="noreferrer">{option.keyLinkLabel} <ArrowRight size={13} /></a>
+                </div>
+                <div className="settings-row">
+                  <div><b>Activate AI generation</b><small>Allow {option.label} to generate design systems for this account.</small></div>
+                  <button type="button" className={`toggle-switch ${activated ? 'on' : ''}`} aria-label={`Toggle ${option.label} AI generation`} aria-pressed={activated} disabled={!savedKey || busy} onClick={() => void toggleProviderAi(option.id)}><i /></button>
+                </div>
+              </form>
             </div>
-            {geminiKeyError && <div className="firebase-auth-error" role="alert">{geminiKeyError}</div>}
-            <div className="settings-ai-meta">
-              <span className={`preference-status ${geminiApiKey ? '' : 'off'}`}><i />{geminiApiKey ? 'Key saved to your account' : 'No key saved'}</span>
-              <a className="text-link" href={GEMINI_KEY_URL} target="_blank" rel="noreferrer">Get a Gemini API key <ArrowRight size={13} /></a>
-            </div>
-            <div className="settings-row">
-              <div><b>Activate AI generation</b><small>Show the AI prompt panel on the Design tokens page for this account.</small></div>
-              <button type="button" className={`toggle-switch ${geminiEnabled ? 'on' : ''}`} aria-label="Toggle AI generation" aria-pressed={geminiEnabled} disabled={!geminiApiKey || savingKey} onClick={() => void toggleAiGeneration()}><i /></button>
-            </div>
-            <p className="field-hint">Your key is stored in your private account data and is only used for generation requests made from this browser. Every signed-in user connects their own key.</p>
+          })}
+          {aiKeyError && <div className="firebase-auth-error" role="alert">{aiKeyError}</div>}
+          <div className="settings-ai-footer">
+            <p className="field-hint">Keys are stored in your private account data and are only used for generation requests made from this browser. Every signed-in user connects their own keys. When more than one provider is activated, Gemini is used first, then OpenRouter, then OpenAI.</p>
             <Link className="button-secondary compact" to="/tokens">Open AI prompt <ArrowRight size={13} /></Link>
-          </form>
+          </div>
         </Panel>
+
       </div>
       <aside className="settings-side">
         <Panel title="About" description="A little about this workspace.">
